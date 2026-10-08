@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidInventory(data) {
+      return data.itemNumber is number
+        && data.setor is string && data.setor.size() <= 100
+        && data.serial is string && data.serial.size() <= 150
+        && data.termoAssinado in ['SIM', 'NÃO', 'PENDENTE'];
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Inventory items collection
+    match /inventory/{itemId} {
+      allow read: if true;
+      allow create: if isValidId(itemId) && isValidInventory(incoming());
+      allow update: if isValidId(itemId) && isValidInventory(incoming());
+      allow delete: if isValidId(itemId);
+    }
+
+    // Settings collection
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isValidId(settingId);
+    }
+  }
+}

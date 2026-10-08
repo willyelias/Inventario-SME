@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "inventoryItem": {
+      "title": "InventoryItem",
+      "description": "Equipamento ou estação de trabalho inventariada",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "itemNumber": { "type": "number" },
+        "setor": { "type": "string", "maxLength": 100 },
+        "sala": { "type": "string", "maxLength": 100 },
+        "marca": { "type": "string", "maxLength": 100 },
+        "modelo": { "type": "string", "maxLength": 150 },
+        "nome": { "type": "string", "maxLength": 150 },
+        "serial": { "type": "string", "maxLength": 150 },
+        "monitor1Serial": { "type": "string", "maxLength": 150 },
+        "monitor1Marca": { "type": "string", "maxLength": 100 },
+        "monitor2Serial": { "type": "string", "maxLength": 150 },
+        "monitor2Marca": { "type": "string", "maxLength": 100 },
+        "adaptador": { "type": "string", "enum": ["SIM", "NÃO"] },
+        "nobreakModelo": { "type": "string", "maxLength": 150 },
+        "nobreakSerial": { "type": "string", "maxLength": 150 },
+        "responsavel": { "type": "string", "maxLength": 200 },
+        "matriculaCpf": { "type": "string", "maxLength": 100 },
+        "funcao": { "type": "string", "maxLength": 150 },
+        "termoAssinado": { "type": "string", "enum": ["SIM", "NÃO", "PENDENTE"] },
+        "observacoes": { "type": "string", "maxLength": 1000 },
+        "signatureDataUrl": { "type": "string", "maxLength": 200000 },
+        "syncedToGoogleSheet": { "type": "boolean" },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["itemNumber", "setor", "serial", "termoAssinado"]
+    },
+    "appSettings": {
+      "title": "AppSettings",
+      "description": "Configurações da planilha de controle central vinculada",
+      "type": "object",
+      "properties": {
+        "spreadsheetId": { "type": "string", "maxLength": 200 },
+        "spreadsheetTitle": { "type": "string", "maxLength": 200 },
+        "sheetName": { "type": "string", "maxLength": 100 },
+        "spreadsheetUrl": { "type": "string", "maxLength": 500 },
+        "autoSync": { "type": "boolean" },
+        "lastSyncedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/inventory/{itemId}": {
+      "schema": "inventoryItem",
+      "description": "Lista de equipamentos de TI registrados e compartilhados na base central."
+    },
+    "/settings/{settingId}": {
+      "schema": "appSettings",
+      "description": "Configurações gerais e vínculo com Google Sheets."
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Inventário de TI - Coleta e Gestão",
+  "description": "Aplicativo mobile-first para coleta em campo e sincronização automática com planilha central de inventário de TI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
