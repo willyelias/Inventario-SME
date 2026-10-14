@@ -95,11 +95,23 @@ export function subscribeToInventory(
   );
 }
 
+// Helper to strip undefined fields so Firestore doesn't reject writes
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const clean: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (val !== undefined) {
+      clean[key] = val;
+    }
+  }
+  return clean;
+}
+
 // Save or Update single inventory item
 export async function saveInventoryItemFirestore(item: InventoryItem): Promise<void> {
   const path = `inventory/${item.id}`;
   try {
-    await setDoc(doc(db, 'inventory', item.id), item, { merge: true });
+    await setDoc(doc(db, 'inventory', item.id), sanitizeForFirestore(item), { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -128,7 +140,7 @@ export async function batchSaveInventoryFirestore(items: InventoryItem[]): Promi
     for (const chunk of chunks) {
       const batch = writeBatch(db);
       chunk.forEach((item) => {
-        batch.set(doc(db, 'inventory', item.id), item, { merge: true });
+        batch.set(doc(db, 'inventory', item.id), sanitizeForFirestore(item), { merge: true });
       });
       await batch.commit();
     }
@@ -141,7 +153,7 @@ export async function batchSaveInventoryFirestore(items: InventoryItem[]): Promi
 export async function saveSettingsFirestore(settings: GoogleSheetConfig): Promise<void> {
   const path = 'settings/googleSheets';
   try {
-    await setDoc(doc(db, 'settings', 'googleSheets'), settings, { merge: true });
+    await setDoc(doc(db, 'settings', 'googleSheets'), sanitizeForFirestore(settings), { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -158,5 +170,49 @@ export async function getSettingsFirestore(): Promise<GoogleSheetConfig | null> 
     return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+// Clear and replace all inventory items in Firestore
+export async function resetInventoryFirestore(newItems: InventoryItem[]): Promise<void> {
+  const path = 'inventory';
+  try {
+    const snap = await getDocs(collection(db, path));
+    const docs = snap.docs;
+
+    for (let i = 0; i < docs.length; i += 400) {
+      const chunk = docs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+
+    await batchSaveInventoryFirestore(newItems);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+// Get and set dataset version in settings/datasetVersion
+export async function getDatasetVersionFirestore(): Promise<string | null> {
+  const path = 'settings/datasetVersion';
+  try {
+    const snap = await getDoc(doc(db, 'settings', 'datasetVersion'));
+    if (snap.exists()) {
+      return (snap.data() as { version?: string })?.version || null;
+    }
+    return null;
+  } catch (error) {
+    console.warn('Erro ao obter versão do dataset:', error);
+    return null;
+  }
+}
+
+export async function setDatasetVersionFirestore(version: string): Promise<void> {
+  const path = 'settings/datasetVersion';
+  try {
+    await setDoc(doc(db, 'settings', 'datasetVersion'), { version, updatedAt: new Date().toISOString() }, { merge: true });
+  } catch (error) {
+    console.warn('Erro ao atualizar versão do dataset:', error);
   }
 }

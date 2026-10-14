@@ -1,5 +1,6 @@
 import { InventoryItem } from '../types/inventory';
 import * as XLSX from 'xlsx';
+import { isPrinterItem } from '../utils/inventoryValidation';
 
 export const INVENTORY_HEADERS = [
   '#',
@@ -65,81 +66,390 @@ export function itemToRow(item: InventoryItem): (string | number)[] {
   ];
 }
 
-export function parseFlexibleRow(row: any[], headerMap?: Record<string, number>, index: number = 0): InventoryItem {
-  const getCol = (names: string[], fallbackIdx: number): string => {
+export function buildHeaderMap(headers: (string | undefined | null)[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  let seenNobreak = false;
+
+  headers.forEach((h, idx) => {
+    const raw = String(h || '').trim();
+    const up = raw.toUpperCase();
+    if (!up) return;
+
+    if (up.includes('NOBREAK') || up.includes('MÓDULO') || up.includes('MODULO')) {
+      seenNobreak = true;
+      if (!up.includes('SERIAL')) {
+        map['NOBREAK_MODELO'] = idx;
+        map['NOBREAK/ MÓDULO'] = idx;
+        map['NOBREAK'] = idx;
+      }
+    }
+
+    if (
+      up === 'SERIAL' ||
+      up === 'SERIE' ||
+      up === 'SÉRIE' ||
+      up === 'Nº DE SÉRIE' ||
+      up === 'Nº SERIE' ||
+      up === 'NUMERO DE SERIE'
+    ) {
+      if (seenNobreak && map['NOBREAK_SERIAL'] === undefined) {
+        map['NOBREAK_SERIAL'] = idx;
+      } else if (map['EQUIP_SERIAL'] === undefined) {
+        map['EQUIP_SERIAL'] = idx;
+        map['SERIAL'] = idx;
+      }
+    } else if (
+      up.includes('SERIAL') &&
+      (up.includes('NOBREAK') || up.includes('MÓDULO') || up.includes('MODULO'))
+    ) {
+      map['NOBREAK_SERIAL'] = idx;
+    } else if (
+      up.includes('SERIAL') &&
+      !up.includes('MONITOR')
+    ) {
+      if (map['EQUIP_SERIAL'] === undefined) {
+        map['EQUIP_SERIAL'] = idx;
+        map['SERIAL'] = idx;
+      }
+    } else {
+      map[up] = idx;
+    }
+  });
+
+  return map;
+}
+
+export function parseFlexibleRow(
+  row: any[],
+  headerMap?: Record<string, number>,
+  index: number = 0,
+  existingItems?: InventoryItem[]
+): InventoryItem {
+  const getCol = (names: string[], fallbackIdx: number = -1): string => {
     if (headerMap) {
       for (const name of names) {
         const idx = headerMap[name.toUpperCase().trim()];
         if (idx !== undefined && row[idx] !== undefined && row[idx] !== null) {
-          return String(row[idx]).trim();
+          const val = String(row[idx]).trim();
+          if (val !== '') return val;
         }
       }
     }
-    return row[fallbackIdx] !== undefined && row[fallbackIdx] !== null ? String(row[fallbackIdx]).trim() : '';
+    if (fallbackIdx >= 0 && row[fallbackIdx] !== undefined && row[fallbackIdx] !== null) {
+      return String(row[fallbackIdx]).trim();
+    }
+    return '';
   };
 
-  const itemNumVal = getCol(['#', 'NUM', 'ITEM'], 0);
+  const itemNumVal = getCol(['#', 'NUM', 'ITEM', 'ITEMNUMBER'], 0);
   const itemNumber = Number(itemNumVal) || index + 1;
 
+  const rawSerial = getCol(['EQUIP_SERIAL', 'SERIAL', 'SERIE', 'SÉRIE', 'Nº SERIE', 'Nº DE SÉRIE'], 6);
+  const rawSetor = getCol(['SETOR', 'DEPARTAMENTO'], 1);
+  const rawSala = getCol(['SALA', 'LOCAL'], 2);
+  const rawMarca = getCol(['MARCA', 'FABRICANTE'], 3);
+  const rawModelo = getCol(['MODELO'], 4);
+  const rawNome = getCol(['NOME', 'HOSTNAME', 'COMPUTADOR'], 5);
+  const rawM1Serial = getCol(['MONITOR 1 (SERIAL)', 'MONITOR 1', 'SERIAL MONITOR 1'], 7) || '-';
+  const rawM1Marca = getCol(['MARCA MONITOR 1', 'MARCA M1'], 8) || '-';
+  const rawM2Serial = getCol(['MONITOR 2 (SERIAL)', 'MONITOR 2', 'SERIAL MONITOR 2'], 9) || '-';
+  const rawM2Marca = getCol(['MARCA MONITOR 2', 'MARCA M2'], 10) || '-';
+  const rawAdaptador = getCol(['ADAPTADOR', 'ADAPT.'], 11).toUpperCase().includes('SIM') ? 'SIM' : 'NÃO';
+  const rawNbModelo = getCol(['NOBREAK_MODELO', 'NOBREAK/ MÓDULO', 'NOBREAK', 'MODULO'], 12) || '-';
+  const rawNbSerial = getCol(['NOBREAK_SERIAL', 'SERIAL NOBREAK', 'SERIAL MÓDULO', 'SERIAL NOBREAK/MÓDULO'], 13) || '-';
+  const rawResp = getCol(['RESPONSÁVEL', 'RESPONSAVEL', 'USUÁRIO'], 14);
+  const rawMatricula = getCol(['MATRÍCULA/ CPF', 'MATRICULA/CPF', 'MATRICULA', 'CPF'], 15);
+  const rawFuncao = getCol(['FUNÇÃO', 'FUNCAO', 'CARGO'], 16);
+  const rawTermo = getCol(['TERMO ASSINADO', 'TERMO'], 17).toUpperCase().includes('SIM') ? 'SIM' : 'NÃO';
+  const rawPatrimonio = getCol(['PATRIMÔNIO', 'PATRIMONIO', 'TOMBO', 'Nº PATRIMÔNIO']);
+  let rawObs = getCol(['OBSERVAÇÕES', 'OBSERVACOES', 'DATA ATUALIZAÇÃO'], 18);
+
+  const isPrinter = isPrinterItem({
+    nome: rawNome,
+    marca: rawMarca,
+    modelo: rawModelo,
+    observacoes: rawObs
+  });
+
+  if (isPrinter && rawPatrimonio && !rawObs) {
+    rawObs = rawPatrimonio.toUpperCase().startsWith('PATRIMÔNIO') || rawPatrimonio.toUpperCase().startsWith('PATRIMONIO')
+      ? rawPatrimonio
+      : `Patrimônio: ${rawPatrimonio}`;
+  }
+
+  // Find matching existing item for stable ID and preserved local states
+  const matchedExisting = existingItems?.find(
+    (e) => (rawSerial && e.serial && e.serial.toLowerCase().trim() === rawSerial.toLowerCase().trim()) ||
+           (e.itemNumber === itemNumber)
+  );
+
   return {
-    id: 'row-' + (index + 1) + '-' + Date.now(),
+    id: matchedExisting ? matchedExisting.id : `inv-${itemNumber}`,
     itemNumber,
-    setor: getCol(['SETOR', 'DEPARTAMENTO'], 1),
-    sala: getCol(['SALA', 'LOCAL'], 2),
-    marca: getCol(['MARCA', 'FABRICANTE'], 3),
-    modelo: getCol(['MODELO'], 4),
-    nome: getCol(['NOME', 'HOSTNAME', 'COMPUTADOR'], 5),
-    serial: getCol(['SERIAL', 'SERIE', 'Nº SERIE'], 6),
-    monitor1Serial: getCol(['MONITOR 1 (SERIAL)', 'MONITOR 1', 'SERIAL MONITOR 1'], 7) || '-',
-    monitor1Marca: getCol(['MARCA MONITOR 1', 'MARCA M1'], 8) || '-',
-    monitor2Serial: getCol(['MONITOR 2 (SERIAL)', 'MONITOR 2', 'SERIAL MONITOR 2'], 9) || '-',
-    monitor2Marca: getCol(['MARCA MONITOR 2', 'MARCA M2'], 10) || '-',
-    adaptador: getCol(['ADAPTADOR', 'ADAPT.'], 11).toUpperCase().includes('SIM') ? 'SIM' : 'NÃO',
-    nobreakModelo: getCol(['NOBREAK/ MÓDULO', 'NOBREAK', 'MODULO'], 12) || '-',
-    nobreakSerial: getCol(['SERIAL NOBREAK', 'SERIAL MÓDULO', 'SERIAL NOBREAK/MÓDULO'], 13) || '-',
-    responsavel: getCol(['RESPONSÁVEL', 'RESPONSAVEL', 'USUÁRIO'], 14),
-    matriculaCpf: getCol(['MATRÍCULA/ CPF', 'MATRICULA/CPF', 'MATRICULA', 'CPF'], 15),
-    funcao: getCol(['FUNÇÃO', 'FUNCAO', 'CARGO'], 16),
-    termoAssinado: getCol(['TERMO ASSINADO', 'TERMO'], 17).toUpperCase().includes('SIM') ? 'SIM' : 'NÃO',
-    observacoes: getCol(['OBSERVAÇÕES', 'OBSERVACOES', 'DATA ATUALIZAÇÃO'], 18),
+    setor: rawSetor,
+    sala: rawSala,
+    marca: rawMarca,
+    modelo: rawModelo,
+    nome: rawNome || (isPrinter ? 'IMPRESSORA' : ''),
+    serial: rawSerial,
+    monitor1Serial: isPrinter ? '-' : rawM1Serial,
+    monitor1Marca: isPrinter ? '-' : rawM1Marca,
+    monitor2Serial: isPrinter ? '-' : rawM2Serial,
+    monitor2Marca: isPrinter ? '-' : rawM2Marca,
+    adaptador: isPrinter ? 'NÃO' : rawAdaptador,
+    nobreakModelo: isPrinter ? '-' : rawNbModelo,
+    nobreakSerial: isPrinter ? '-' : rawNbSerial,
+    responsavel: isPrinter ? (rawResp || '-') : rawResp,
+    matriculaCpf: isPrinter ? (rawMatricula || '-') : rawMatricula,
+    funcao: isPrinter ? (rawFuncao || '-') : rawFuncao,
+    termoAssinado: isPrinter ? 'NÃO' : rawTermo,
+    observacoes: rawObs,
+    signatureDataUrl: matchedExisting?.signatureDataUrl,
     syncedToGoogleSheet: true,
     sheetRowIndex: index + 2,
-    createdAt: new Date().toISOString(),
+    createdAt: matchedExisting?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toLocaleString('pt-BR')
   };
 }
 
-export function parseXlsxBuffer(buffer: ArrayBuffer): { items: InventoryItem[]; sheetName: string } {
+export interface ParseXlsxResult {
+  items: InventoryItem[];
+  sheetName: string;
+  sheetNames: string[];
+  stats: {
+    totalItems: number;
+    computadores: number;
+    impressoras: number;
+    sheetsProcessed: string[];
+  };
+}
+
+export function parseXlsxBuffer(
+  buffer: ArrayBuffer,
+  existingItems?: InventoryItem[]
+): ParseXlsxResult {
   const workbook = XLSX.read(buffer, { type: 'array' });
-  const sheetName = workbook.SheetNames[0] || 'Inventário TI';
-  const worksheet = workbook.Sheets[sheetName];
-  const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const allItems: InventoryItem[] = [];
+  const sheetsProcessed: string[] = [];
+  let itemCounter = 1;
 
-  if (jsonData.length === 0) {
-    return { items: [], sheetName };
-  }
+  for (const sheetName of workbook.SheetNames) {
+    const sheetUpper = sheetName.toUpperCase().trim();
+    // Skip reference/lookup sheets
+    if (
+      sheetUpper.includes('DADOS') ||
+      sheetUpper.includes('VALIDA') ||
+      sheetUpper.includes('LOOKUP') ||
+      sheetUpper.includes('CONFIG') ||
+      sheetUpper.includes('RESUMO') ||
+      sheetUpper.includes('AJUDA')
+    ) {
+      continue;
+    }
 
-  // Find header row (usually row 0 or row 1)
-  let headerRowIdx = 0;
-  for (let i = 0; i < Math.min(jsonData.length, 5); i++) {
-    const row = jsonData[i] || [];
-    const joined = row.map((c) => String(c || '').toUpperCase()).join(' ');
-    if (joined.includes('SETOR') || joined.includes('SERIAL') || joined.includes('MARCA')) {
-      headerRowIdx = i;
-      break;
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) continue;
+    const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    if (!jsonData || jsonData.length < 2) continue;
+
+    // Find header row in first 6 rows
+    let headerRowIdx = -1;
+    for (let i = 0; i < Math.min(jsonData.length, 6); i++) {
+      const row = jsonData[i] || [];
+      const joined = row.map((c) => String(c || '').toUpperCase()).join(' ');
+      if (
+        joined.includes('SETOR') ||
+        joined.includes('SERIAL') ||
+        joined.includes('MARCA') ||
+        joined.includes('MODELO') ||
+        joined.includes('PATRIMÔNIO') ||
+        joined.includes('PATRIMONIO')
+      ) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+    if (headerRowIdx === -1) continue;
+
+    sheetsProcessed.push(sheetName);
+
+    const rawHeaders = (jsonData[headerRowIdx] || []).map((h) => String(h || '').trim());
+    const headerMap = buildHeaderMap(rawHeaders);
+
+    const isDedicatedPrinterSheet =
+      sheetUpper.includes('IMPRESSOR') ||
+      sheetUpper.includes('PRINTER') ||
+      sheetUpper.includes('MULTIFUNC') ||
+      (!rawHeaders.some((h) => h.toUpperCase().includes('MONITOR')) &&
+        rawHeaders.some((h) => h.toUpperCase().includes('PATRIM')));
+
+    const dataRows = jsonData.slice(headerRowIdx + 1);
+
+    for (const row of dataRows) {
+      if (!row || !row.some((c) => c !== undefined && c !== null && String(c).trim() !== '')) {
+        continue;
+      }
+
+      const getVal = (...keys: string[]): string => {
+        for (const k of keys) {
+          const idx = headerMap[k.toUpperCase()];
+          if (idx !== undefined && row[idx] !== undefined && row[idx] !== null) {
+            const val = String(row[idx]).trim();
+            if (val !== '') return val;
+          }
+        }
+        return '';
+      };
+
+      if (isDedicatedPrinterSheet) {
+        const setor = getVal('SETOR', 'DEPARTAMENTO');
+        const sala = getVal('SALA', 'LOCAL');
+        const marca = getVal('MARCA', 'FABRICANTE');
+        const modelo = getVal('MODELO');
+        const serial = getVal('EQUIP_SERIAL', 'SERIAL', 'SERIE', 'SÉRIE', 'Nº SERIE', 'Nº DE SÉRIE');
+        const patVal = getVal('PATRIMÔNIO', 'PATRIMONIO', 'TOMBO', 'Nº PATRIMÔNIO');
+
+        // Skip completely empty identifier row
+        if (!setor && !marca && !modelo && !serial) continue;
+
+        const currentNum = itemCounter++;
+        const matchedExisting = existingItems?.find(
+          (e) => (serial && e.serial && e.serial.toLowerCase().trim() === serial.toLowerCase().trim()) ||
+                 (e.itemNumber === currentNum)
+        );
+
+        let observacoes = '';
+        if (patVal) {
+          observacoes = patVal.toUpperCase().startsWith('PATRIMÔNIO') || patVal.toUpperCase().startsWith('PATRIMONIO')
+            ? patVal
+            : `Patrimônio: ${patVal}`;
+        }
+
+        allItems.push({
+          id: matchedExisting ? matchedExisting.id : `inv-${currentNum}`,
+          itemNumber: currentNum,
+          setor,
+          sala,
+          marca,
+          modelo,
+          nome: 'IMPRESSORA',
+          serial,
+          monitor1Serial: '-',
+          monitor1Marca: '-',
+          monitor2Serial: '-',
+          monitor2Marca: '-',
+          adaptador: 'NÃO',
+          nobreakModelo: '-',
+          nobreakSerial: '-',
+          responsavel: '-',
+          matriculaCpf: '-',
+          funcao: '-',
+          termoAssinado: 'NÃO',
+          observacoes,
+          signatureDataUrl: matchedExisting?.signatureDataUrl,
+          syncedToGoogleSheet: true,
+          sheetRowIndex: currentNum + 1,
+          createdAt: matchedExisting?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toLocaleString('pt-BR')
+        });
+      } else {
+        const setor = getVal('SETOR', 'DEPARTAMENTO');
+        const marca = getVal('MARCA', 'FABRICANTE');
+        const modelo = getVal('MODELO');
+        const serial = getVal('EQUIP_SERIAL', 'SERIAL', 'SERIE', 'SÉRIE', 'Nº SERIE', 'Nº DE SÉRIE');
+
+        if (!setor && !marca && !modelo && !serial) continue;
+
+        const currentNum = itemCounter++;
+        const matchedExisting = existingItems?.find(
+          (e) => (serial && e.serial && e.serial.toLowerCase().trim() === serial.toLowerCase().trim()) ||
+                 (e.itemNumber === currentNum)
+        );
+
+        const sala = getVal('SALA', 'LOCAL');
+        const nome = getVal('NOME', 'HOSTNAME', 'COMPUTADOR');
+        const m1s = getVal('MONITOR 1 (SERIAL)', 'MONITOR 1', 'SERIAL MONITOR 1') || '-';
+        const m1m = getVal('MARCA MONITOR 1', 'MARCA M1') || '-';
+        const m2s = getVal('MONITOR 2 (SERIAL)', 'MONITOR 2', 'SERIAL MONITOR 2') || '-';
+        const m2m = getVal('MARCA MONITOR 2', 'MARCA M2') || '-';
+        const adapt = getVal('ADAPTADOR', 'ADAPT.').toUpperCase().includes('SIM') ? 'SIM' : 'NÃO';
+        const nbMod = getVal('NOBREAK_MODELO', 'NOBREAK/ MÓDULO', 'NOBREAK', 'MODULO') || '-';
+        const nbSer = getVal('NOBREAK_SERIAL', 'SERIAL NOBREAK', 'SERIAL MÓDULO', 'SERIAL NOBREAK/MÓDULO') || '-';
+        const resp = getVal('RESPONSÁVEL', 'RESPONSAVEL', 'USUÁRIO');
+        const mat = getVal('MATRÍCULA/ CPF', 'MATRICULA/CPF', 'MATRICULA', 'CPF');
+        const func = getVal('FUNÇÃO', 'FUNCAO', 'CARGO');
+        const termo = getVal('TERMO ASSINADO', 'TERMO').toUpperCase().includes('SIM') ? 'SIM' : 'NÃO';
+        const patVal = getVal('PATRIMÔNIO', 'PATRIMONIO', 'TOMBO', 'Nº PATRIMÔNIO');
+        let obs = getVal('OBSERVAÇÕES', 'OBSERVACOES');
+
+        const isRowPrinter = isPrinterItem({
+          nome,
+          marca,
+          modelo,
+          observacoes: obs
+        });
+
+        if (isRowPrinter && patVal && !obs) {
+          obs = patVal.toUpperCase().startsWith('PATRIMÔNIO') || patVal.toUpperCase().startsWith('PATRIMONIO')
+            ? patVal
+            : `Patrimônio: ${patVal}`;
+        }
+
+        allItems.push({
+          id: matchedExisting ? matchedExisting.id : `inv-${currentNum}`,
+          itemNumber: currentNum,
+          setor,
+          sala,
+          marca,
+          modelo,
+          nome: isRowPrinter ? (nome || 'IMPRESSORA') : nome,
+          serial,
+          monitor1Serial: isRowPrinter ? '-' : m1s,
+          monitor1Marca: isRowPrinter ? '-' : m1m,
+          monitor2Serial: isRowPrinter ? '-' : m2s,
+          monitor2Marca: isRowPrinter ? '-' : m2m,
+          adaptador: isRowPrinter ? 'NÃO' : adapt,
+          nobreakModelo: isRowPrinter ? '-' : nbMod,
+          nobreakSerial: isRowPrinter ? '-' : nbSer,
+          responsavel: isRowPrinter ? (resp || '-') : resp,
+          matriculaCpf: isRowPrinter ? (mat || '-') : mat,
+          funcao: isRowPrinter ? (func || '-') : func,
+          termoAssinado: isRowPrinter ? 'NÃO' : termo,
+          observacoes: obs,
+          signatureDataUrl: matchedExisting?.signatureDataUrl,
+          syncedToGoogleSheet: true,
+          sheetRowIndex: currentNum + 1,
+          createdAt: matchedExisting?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toLocaleString('pt-BR')
+        });
+      }
     }
   }
 
-  const headers = (jsonData[headerRowIdx] || []).map((h) => String(h || '').toUpperCase().trim());
-  const headerMap: Record<string, number> = {};
-  headers.forEach((h, idx) => {
-    headerMap[h] = idx;
+  // Count items
+  let computadores = 0;
+  let impressoras = 0;
+  allItems.forEach((item) => {
+    if (isPrinterItem(item)) {
+      impressoras++;
+    } else {
+      computadores++;
+    }
   });
 
-  const dataRows = jsonData.slice(headerRowIdx + 1).filter((r) => r && r.length > 0 && r.some((c) => c !== undefined && c !== ''));
+  const firstSheet = sheetsProcessed[0] || workbook.SheetNames[0] || 'Inventário TI';
 
-  const items = dataRows.map((row, idx) => parseFlexibleRow(row, headerMap, idx));
-  return { items, sheetName };
+  return {
+    items: allItems,
+    sheetName: firstSheet,
+    sheetNames: workbook.SheetNames,
+    stats: {
+      totalItems: allItems.length,
+      computadores,
+      impressoras,
+      sheetsProcessed
+    }
+  };
 }
 
 export async function createInventorySpreadsheet(
@@ -252,11 +562,8 @@ export async function readSpreadsheetRows(
   const allRows: any[][] = data.values || [];
   if (allRows.length === 0) return [];
 
-  const headers = (allRows[0] || []).map((h) => String(h || '').toUpperCase().trim());
-  const headerMap: Record<string, number> = {};
-  headers.forEach((h, idx) => {
-    headerMap[h] = idx;
-  });
+  const headers = allRows[0] || [];
+  const headerMap = buildHeaderMap(headers);
 
   const dataRows = allRows.slice(1);
   return dataRows.map((row, idx) => parseFlexibleRow(row, headerMap, idx));

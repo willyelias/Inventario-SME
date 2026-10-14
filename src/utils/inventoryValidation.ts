@@ -5,42 +5,90 @@ export interface PendingFieldInfo {
   label: string;
 }
 
+/**
+ * Detecta se o equipamento é uma impressora ou multifuncional com base nos campos do cadastro.
+ */
+export const isPrinterItem = (item: Partial<InventoryItem>): boolean => {
+  const nomeUpper = item.nome?.toUpperCase() || '';
+  const modeloUpper = item.modelo?.toUpperCase() || '';
+  const obsUpper = item.observacoes?.toUpperCase() || '';
+  const marcaUpper = item.marca?.toUpperCase() || '';
+
+  return (
+    nomeUpper === 'IMPRESSORA' ||
+    nomeUpper.includes('IMPRESSORA') ||
+    modeloUpper.includes('LASERJET') ||
+    modeloUpper.includes('IMAGE RUNNER') ||
+    modeloUpper.includes('MFP') ||
+    modeloUpper.includes('ECOTANK') ||
+    modeloUpper.includes('DESKJET') ||
+    (marcaUpper === 'CANON' && (modeloUpper.includes('ADVANCE') || modeloUpper.includes('DX'))) ||
+    obsUpper.includes('IMPRESSORA')
+  );
+};
+
+/**
+ * Verifica se um campo está vazio.
+ * Um traço (-) indica que o item não possui ou não se aplica (ex: notebook sem monitor externo,
+ * impressora sem nobreak, etc.) e portanto NÃO deve ser considerado pendente.
+ */
+export const isValueEmpty = (val?: string): boolean => {
+  if (!val || typeof val !== 'string') return true;
+  const trimmed = val.trim();
+  if (trimmed === '-') return false;
+  return trimmed === '';
+};
+
 export function getPendingFields(item: InventoryItem): PendingFieldInfo[] {
   const pending: PendingFieldInfo[] = [];
+  const isPrinter = isPrinterItem(item);
 
-  // Missing computer name/hostname
-  if (!item.nome || item.nome.trim() === '' || item.nome.trim() === '-') {
-    pending.push({ key: 'nome', label: 'Nome da Máquina' });
+  // Serial do Equipamento
+  if (isValueEmpty(item.serial)) {
+    pending.push({ key: 'serial', label: isPrinter ? 'Serial da Impressora' : 'Serial do PC' });
   }
 
-  // Missing computer serial
-  if (!item.serial || item.serial.trim() === '' || item.serial.trim() === '-') {
-    pending.push({ key: 'serial', label: 'Serial do PC' });
+  // Setor
+  if (isValueEmpty(item.setor)) {
+    pending.push({ key: 'setor', label: 'Setor' });
   }
 
-  // Missing responsible person
-  if (!item.responsavel || item.responsavel.trim() === '' || item.responsavel.trim() === '-') {
-    pending.push({ key: 'responsavel', label: 'Responsável' });
+  // Sala
+  if (isValueEmpty(item.sala)) {
+    pending.push({ key: 'sala', label: 'Sala' });
   }
 
-  // Missing Matricula / CPF
-  if (!item.matriculaCpf || item.matriculaCpf.trim() === '' || item.matriculaCpf.trim() === '-') {
-    pending.push({ key: 'matriculaCpf', label: 'Matrícula / CPF' });
-  }
+  // Validações específicas para Computadores e Estações
+  if (!isPrinter) {
+    // Nome da Máquina (Host)
+    if (isValueEmpty(item.nome)) {
+      pending.push({ key: 'nome', label: 'Nome da Máquina' });
+    }
 
-  // Missing function/role
-  if (!item.funcao || item.funcao.trim() === '' || item.funcao.trim() === '-') {
-    pending.push({ key: 'funcao', label: 'Função / Cargo' });
-  }
+    // Responsável
+    if (isValueEmpty(item.responsavel)) {
+      pending.push({ key: 'responsavel', label: 'Responsável' });
+    }
 
-  // Termo not signed
-  if (!item.termoAssinado || item.termoAssinado !== 'SIM') {
-    pending.push({ key: 'termoAssinado', label: 'Termo Assinado' });
-  }
+    // Matrícula / CPF
+    if (isValueEmpty(item.matriculaCpf)) {
+      pending.push({ key: 'matriculaCpf', label: 'Matrícula / CPF' });
+    }
 
-  // Missing monitor 1
-  if (!item.monitor1Serial || item.monitor1Serial.trim() === '' || item.monitor1Serial.trim() === '-') {
-    pending.push({ key: 'monitor1Serial', label: 'Serial Monitor 1' });
+    // Função / Cargo
+    if (isValueEmpty(item.funcao)) {
+      pending.push({ key: 'funcao', label: 'Função / Cargo' });
+    }
+
+    // Termo Assinado
+    if (!item.termoAssinado || item.termoAssinado !== 'SIM') {
+      pending.push({ key: 'termoAssinado', label: 'Termo Assinado' });
+    }
+
+    // Monitor 1 (apenas se vazio; traço '-' indica que não tem monitor, ex: tela de notebook)
+    if (isValueEmpty(item.monitor1Serial)) {
+      pending.push({ key: 'monitor1Serial', label: 'Serial Monitor 1' });
+    }
   }
 
   return pending;
@@ -48,14 +96,194 @@ export function getPendingFields(item: InventoryItem): PendingFieldInfo[] {
 
 export function isFieldPending(item: InventoryItem, field: keyof InventoryItem): boolean {
   if (field === 'termoAssinado') {
+    if (isPrinterItem(item)) return false;
     return item.termoAssinado !== 'SIM';
   }
   const val = item[field];
-  if (!val || typeof val !== 'string') return true;
-  const trimmed = val.trim();
-  return trimmed === '' || trimmed === '-';
+  return isValueEmpty(val as string);
 }
 
 export function hasPendingInfo(item: InventoryItem): boolean {
   return getPendingFields(item).length > 0;
+}
+
+/**
+ * Remove duplicatas da lista de inventário com base em ID e serial normalizado.
+ */
+export function deduplicateInventory(items: InventoryItem[]): InventoryItem[] {
+  const seenIds = new Set<string>();
+  const seenSerials = new Map<string, number>();
+  const result: InventoryItem[] = [];
+
+  for (const item of items) {
+    if (!item) continue;
+    // Pula item com ID duplicado
+    if (seenIds.has(item.id)) continue;
+    seenIds.add(item.id);
+
+    // Verifica serial normalizado (se válido e não for marcador '-')
+    const normSerial = (item.serial || '').trim().toUpperCase();
+    if (normSerial && normSerial !== '-' && normSerial.length > 2) {
+      if (seenSerials.has(normSerial)) {
+        const existingIdx = seenSerials.get(normSerial)!;
+        const existingItem = result[existingIdx];
+        // Se o item atual tem ID canônico 'inv-' e o existente não, substitui
+        if (item.id.startsWith('inv-') && !existingItem.id.startsWith('inv-')) {
+          result[existingIdx] = item;
+        }
+        continue;
+      }
+      seenSerials.set(normSerial, result.length);
+    }
+
+    result.push(item);
+  }
+
+  return result;
+}
+
+/**
+ * Reconcilia os itens existentes com os dados importados de uma planilha:
+ * - Atualiza registros existentes (mantendo ID estável e assinaturas)
+ * - Inclui como novos apenas os registros que faltavam no inventário
+ * - Preserva os itens existentes que não vieram na planilha
+ * - Elimina qualquer possibilidade de duplicação
+ */
+export function reconcileInventory(
+  existingItems: InventoryItem[],
+  incomingItems: InventoryItem[]
+): {
+  reconciled: InventoryItem[];
+  updatedCount: number;
+  addedCount: number;
+} {
+  // 1. Filtrar registros corrompidos/duplicatas antigas (como 'row-*')
+  const cleanExisting = deduplicateInventory(
+    existingItems.filter((item) => item && !item.id.startsWith('row-'))
+  );
+
+  const existingBySerial = new Map<string, InventoryItem>();
+  const existingByHostname = new Map<string, InventoryItem>();
+  const existingById = new Map<string, InventoryItem>();
+  const existingByPatrimonio = new Map<string, InventoryItem>();
+
+  const extractPatrimonio = (str?: string): string => {
+    if (!str) return '';
+    const match = str.match(/\b\d{4,8}\b/);
+    return match ? match[0] : '';
+  };
+
+  cleanExisting.forEach((item) => {
+    existingById.set(item.id, item);
+    const s = (item.serial || '').trim().toUpperCase();
+    if (s && s !== '-' && s.length > 2) {
+      existingBySerial.set(s, item);
+    }
+    const h = (item.nome || '').trim().toUpperCase();
+    if (h && h !== '-' && h !== 'IMPRESSORA' && h.length > 2) {
+      existingByHostname.set(h, item);
+    }
+    const pat = extractPatrimonio(item.observacoes);
+    if (pat && isPrinterItem(item)) {
+      existingByPatrimonio.set(pat, item);
+    }
+  });
+
+  const matchedExistingIds = new Set<string>();
+  const finalItems: InventoryItem[] = [];
+  let updatedCount = 0;
+  let addedCount = 0;
+
+  let maxItemNumber = cleanExisting.reduce((max, i) => Math.max(max, i.itemNumber || 0), 0);
+
+  // 2. Processar itens que vieram da planilha importada
+  for (const inc of incomingItems) {
+    if (!inc) continue;
+
+    const incSerial = (inc.serial || '').trim().toUpperCase();
+    const incNome = (inc.nome || '').trim().toUpperCase();
+    const incPat = extractPatrimonio(inc.observacoes);
+
+    let match: InventoryItem | undefined;
+
+    // Regra 1: Serial exato
+    if (incSerial && incSerial !== '-' && incSerial.length > 2 && existingBySerial.has(incSerial)) {
+      match = existingBySerial.get(incSerial);
+    }
+
+    // Regra 2: Patrimônio de impressora
+    if (!match && isPrinterItem(inc) && incPat && existingByPatrimonio.has(incPat)) {
+      match = existingByPatrimonio.get(incPat);
+    }
+
+    // Regra 3: Hostname do computador
+    if (!match && incNome && incNome !== '-' && incNome !== 'IMPRESSORA' && existingByHostname.has(incNome)) {
+      match = existingByHostname.get(incNome);
+    }
+
+    // Regra 4: Por ID se coincidir
+    if (!match && inc.id && existingById.has(inc.id)) {
+      match = existingById.get(inc.id);
+    }
+
+    if (match && !matchedExistingIds.has(match.id)) {
+      // ATUALIZAÇÃO DO REGISTRO EXISTENTE
+      matchedExistingIds.add(match.id);
+      updatedCount++;
+
+      const isIncPrinter = isPrinterItem(inc);
+
+      finalItems.push({
+        ...match,
+        setor: inc.setor || match.setor,
+        sala: inc.sala || match.sala,
+        marca: inc.marca || match.marca,
+        modelo: inc.modelo || match.modelo,
+        nome: inc.nome || match.nome,
+        serial: inc.serial || match.serial,
+        monitor1Serial: isIncPrinter ? '-' : (inc.monitor1Serial || match.monitor1Serial),
+        monitor1Marca: isIncPrinter ? '-' : (inc.monitor1Marca || match.monitor1Marca),
+        monitor2Serial: isIncPrinter ? '-' : (inc.monitor2Serial || match.monitor2Serial),
+        monitor2Marca: isIncPrinter ? '-' : (inc.monitor2Marca || match.monitor2Marca),
+        adaptador: isIncPrinter ? 'NÃO' : (inc.adaptador || match.adaptador),
+        nobreakModelo: isIncPrinter ? '-' : (inc.nobreakModelo || match.nobreakModelo),
+        nobreakSerial: isIncPrinter ? '-' : (inc.nobreakSerial || match.nobreakSerial),
+        responsavel: isIncPrinter ? '-' : (inc.responsavel || match.responsavel),
+        matriculaCpf: isIncPrinter ? '-' : (inc.matriculaCpf || match.matriculaCpf),
+        funcao: isIncPrinter ? '-' : (inc.funcao || match.funcao),
+        termoAssinado: isIncPrinter ? 'NÃO' : (inc.termoAssinado || match.termoAssinado),
+        observacoes: inc.observacoes !== undefined ? inc.observacoes : match.observacoes,
+        signatureDataUrl: match.signatureDataUrl || inc.signatureDataUrl || '',
+        updatedAt: new Date().toLocaleString('pt-BR')
+      });
+    } else if (!match) {
+      // INCLUSÃO DO QUE FALTAVA (NOVO EQUIPAMENTO)
+      addedCount++;
+      maxItemNumber++;
+      const newId = `inv-${maxItemNumber}`;
+
+      finalItems.push({
+        ...inc,
+        id: newId,
+        itemNumber: maxItemNumber,
+        updatedAt: new Date().toLocaleString('pt-BR')
+      });
+    }
+  }
+
+  // 3. Preservar itens existentes que NÃO vieram na planilha importada
+  for (const existing of cleanExisting) {
+    if (!matchedExistingIds.has(existing.id)) {
+      finalItems.push(existing);
+    }
+  }
+
+  // 4. Ordenar sequencialmente por itemNumber
+  finalItems.sort((a, b) => a.itemNumber - b.itemNumber);
+
+  return {
+    reconciled: finalItems,
+    updatedCount,
+    addedCount
+  };
 }

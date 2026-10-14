@@ -4,16 +4,10 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { User } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { InventoryItem, GoogleSheetConfig, SyncStatus } from './types/inventory';
 import { INITIAL_INVENTORY_ITEMS } from './data/initialData';
-import {
-  initAuth,
-  googleSignIn,
-  logoutGoogle,
-  getAccessToken
-} from './services/firebaseAuth';
+import { getAccessToken } from './services/firebaseAuth';
 import {
   db,
   subscribeToInventory,
@@ -21,10 +15,12 @@ import {
   deleteInventoryItemFirestore,
   batchSaveInventoryFirestore,
   saveSettingsFirestore,
-  getSettingsFirestore
+  getSettingsFirestore,
+  resetInventoryFirestore,
+  getDatasetVersionFirestore,
+  setDatasetVersionFirestore
 } from './services/firestore';
 import {
-  createInventorySpreadsheet,
   fetchSpreadsheetMetadata,
   appendInventoryRow,
   updateSpreadsheetRow,
@@ -42,24 +38,23 @@ import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { SignatureModal } from './components/SignatureModal';
 import {
   Plus,
-  FileSpreadsheet,
-  ExternalLink,
   CheckCircle2,
-  AlertCircle,
-  Smartphone,
-  Tablet,
-  Laptop,
-  ArrowRight,
-  Database,
-  Cloud
+  AlertCircle
 } from 'lucide-react';
+import {
+  reconcileInventory,
+  deduplicateInventory,
+  isPrinterItem
+} from './utils/inventoryValidation';
 
-const STORAGE_KEY_ITEMS = 'inventario_ti_items_v1';
+const CURRENT_DATA_VERSION = 'v2_2026_10_08';
+const STORAGE_KEY_ITEMS = 'inventario_ti_items_v2';
+const STORAGE_KEY_DATA_VERSION = 'inventario_ti_data_version';
 const STORAGE_KEY_CONFIG = 'inventario_ti_sheets_config_v1';
 
 export default function App() {
-  // Authentication State
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // Category Tab Selection ('COMPUTADORES' | 'IMPRESSORAS' | 'TODOS')
+  const [activeCategoryTab, setActiveCategoryTab] = useState<'COMPUTADORES' | 'IMPRESSORAS' | 'TODOS'>('COMPUTADORES');
 
   // Firestore Database status
   const [isDatabaseConnected, setIsDatabaseConnected] = useState<boolean>(true);
@@ -67,9 +62,19 @@ export default function App() {
   // Inventory Items State
   const [items, setItems] = useState<InventoryItem[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_ITEMS);
-      if (saved) {
-        return JSON.parse(saved);
+      const storedVersion = localStorage.getItem(STORAGE_KEY_DATA_VERSION);
+      if (storedVersion === CURRENT_DATA_VERSION) {
+        const saved = localStorage.getItem(STORAGE_KEY_ITEMS);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } else {
+        localStorage.removeItem('inventario_ti_items_v1');
+        localStorage.setItem(STORAGE_KEY_DATA_VERSION, CURRENT_DATA_VERSION);
+        localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(INITIAL_INVENTORY_ITEMS));
       }
     } catch (e) {
       console.warn('Erro ao carregar itens do localStorage:', e);
@@ -137,17 +142,39 @@ export default function App() {
     testConnection();
   }, []);
 
-  // Realtime Firestore Subscription
+  // Realtime Firestore Subscription & Version check
   useEffect(() => {
     let isInitialLoad = true;
+
+    async function checkAndSyncCloud() {
+      try {
+        const cloudVersion = await getDatasetVersionFirestore();
+        if (cloudVersion !== CURRENT_DATA_VERSION) {
+          console.log('Sincronizando nova versão do dataset com o Firestore...');
+          await resetInventoryFirestore(INITIAL_INVENTORY_ITEMS);
+          await setDatasetVersionFirestore(CURRENT_DATA_VERSION);
+        }
+      } catch (e) {
+        console.warn('Aviso na checagem de versão na nuvem:', e);
+      }
+    }
+
+    checkAndSyncCloud();
+
     const unsubscribe = subscribeToInventory(
       async (remoteItems) => {
         if (remoteItems.length > 0) {
-          setItems(remoteItems);
+          const cloudVersion = await getDatasetVersionFirestore();
+          const cleanItems = deduplicateInventory(remoteItems);
+          if (cloudVersion === CURRENT_DATA_VERSION) {
+            setItems(cleanItems);
+          } else {
+            setItems(INITIAL_INVENTORY_ITEMS);
+          }
         } else if (isInitialLoad && INITIAL_INVENTORY_ITEMS.length > 0) {
-          // If the cloud database is brand new and empty, seed it with initial inventory items
           try {
             await batchSaveInventoryFirestore(INITIAL_INVENTORY_ITEMS);
+            await setDatasetVersionFirestore(CURRENT_DATA_VERSION);
           } catch (e) {
             console.warn('Falha ao inicializar dados no Firestore:', e);
           }
@@ -193,42 +220,6 @@ export default function App() {
     }
   }, [config]);
 
-  // Initialize Firebase Auth listener
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (user) => {
-        setCurrentUser(user);
-      },
-      () => {
-        setCurrentUser(null);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  // Handle Google Sign In
-  const handleSignIn = async () => {
-    try {
-      const res = await googleSignIn();
-      if (res) {
-        setCurrentUser(res.user);
-        showToast(`Bem-vindo, ${res.user.displayName || res.user.email}! Conectado ao Google.`);
-      }
-    } catch (err: any) {
-      showToast(err.message || 'Falha ao autenticar com o Google.', 'error');
-    }
-  };
-
-  // Handle Google Sign Out
-  const handleSignOut = async () => {
-    try {
-      await logoutGoogle();
-      setCurrentUser(null);
-      showToast('Conta Google desconectada.');
-    } catch (err: any) {
-      showToast(err.message || 'Erro ao sair.', 'error');
-    }
-  };
 
   // Save Item (New or Edit) -> Persists in Cloud Firestore & Synced to Google Sheets
   const handleSaveItem = async (item: InventoryItem) => {
@@ -306,58 +297,11 @@ export default function App() {
     setQuickSignItem(null);
   };
 
-  // Create new Google Spreadsheet
-  const handleCreateNewSheet = async (title: string) => {
-    let token = await getAccessToken();
-    if (!token) {
-      const authRes = await googleSignIn();
-      token = authRes?.accessToken || null;
-    }
-    if (!token) throw new Error('Autenticação com Google necessária.');
-
-    const newSheet = await createInventorySpreadsheet(token, title);
-
-    const newConfig: GoogleSheetConfig = {
-      spreadsheetId: newSheet.spreadsheetId,
-      spreadsheetTitle: title,
-      sheetName: newSheet.sheetName,
-      spreadsheetUrl: newSheet.spreadsheetUrl,
-      autoSync: true,
-      lastSyncedAt: new Date().toISOString()
-    };
-    setConfig(newConfig);
-
-    // Save configuration in cloud database for all users
-    try {
-      await saveSettingsFirestore(newConfig);
-    } catch (e) {
-      console.warn('Erro ao salvar settings no Firestore:', e);
-    }
-
-    // Populate the newly created spreadsheet with current items
-    if (items.length > 0) {
-      setSyncStatus((prev) => ({ ...prev, isSyncing: true }));
-      try {
-        await batchAppendInventoryRows(token, newSheet.spreadsheetId, newSheet.sheetName, items);
-        const updated = items.map((i) => ({ ...i, syncedToGoogleSheet: true }));
-        setItems(updated);
-        await batchSaveInventoryFirestore(updated);
-      } finally {
-        setSyncStatus((prev) => ({ ...prev, isSyncing: false }));
-      }
-    }
-
-    showToast(`Planilha "${title}" criada e preenchida no seu Google Drive com sucesso!`);
-  };
 
   // Link existing Google Spreadsheet
   const handleLinkExistingSheet = async (idOrUrl: string) => {
-    let token = await getAccessToken();
-    if (!token) {
-      const authRes = await googleSignIn();
-      token = authRes?.accessToken || null;
-    }
-    if (!token) throw new Error('Autenticação com Google necessária.');
+    const token = await getAccessToken();
+    if (!token) throw new Error('Acesso à API do Google desativado. Para importar seus dados, utilize a Opção B (Carregar arquivo Excel).');
 
     const spreadsheetId = extractSpreadsheetId(idOrUrl);
     if (!spreadsheetId) {
@@ -400,29 +344,47 @@ export default function App() {
     showToast(`Planilha "${metadata.title}" vinculada com sucesso!`);
   };
 
-  // Import directly from .xlsx file
+  // Import directly from .xlsx file (Opção B)
   const handleImportXlsxFile = async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
-    const { items: importedItems } = parseXlsxBuffer(arrayBuffer);
+    const { items: importedItems } = parseXlsxBuffer(arrayBuffer, items);
 
     if (importedItems.length === 0) {
-      throw new Error('Nenhum dado encontrado dentro do arquivo Excel selecionado.');
+      throw new Error('Nenhum dado de inventário encontrado dentro do arquivo Excel selecionado.');
     }
 
-    setItems(importedItems);
-    await batchSaveInventoryFirestore(importedItems);
-    showToast(`${importedItems.length} equipamentos importados e salvos no banco de dados!`);
+    // 1. Reconciliação inteligente: Atualiza equipamentos existentes e inclui apenas o que faltava
+    const { reconciled, updatedCount, addedCount } = reconcileInventory(items, importedItems);
+
+    // 2. Atualiza estado React imediatamente
+    setItems(reconciled);
+
+    // 3. Limpa e regrava na nuvem (Firestore) para garantir persistência 100% limpa, sem duplicatas
+    await resetInventoryFirestore(reconciled);
+
+    // 4. Notifica com resumo detalhado
+    const compCount = reconciled.filter((i) => !isPrinterItem(i)).length;
+    const impCount = reconciled.filter(isPrinterItem);
+
+    showToast(
+      `Planilha processada com sucesso: ${updatedCount} atualizados e ${addedCount} novos incluídos (total: ${reconciled.length} itens sem duplicatas)!`,
+      'success'
+    );
+
+    return {
+      totalItems: reconciled.length,
+      updatedCount,
+      addedCount,
+      computadores: compCount,
+      impressoras: impCount.length
+    };
   };
 
   // Batch Sync all items to Google Sheet
   const handleSyncAll = async () => {
     if (!config?.spreadsheetId) throw new Error('Nenhuma planilha vinculada.');
-    let token = await getAccessToken();
-    if (!token) {
-      const authRes = await googleSignIn();
-      token = authRes?.accessToken || null;
-    }
-    if (!token) throw new Error('Autenticação com Google necessária.');
+    const token = await getAccessToken();
+    if (!token) throw new Error('Acesso à API do Google desativado. Para exportar, utilize o botão "Exportar CSV".');
 
     setSyncStatus((prev) => ({ ...prev, isSyncing: true }));
     try {
@@ -440,20 +402,16 @@ export default function App() {
   // Pull records from central Google Sheet
   const handlePullFromSheet = async () => {
     if (!config?.spreadsheetId) throw new Error('Nenhuma planilha vinculada.');
-    let token = await getAccessToken();
-    if (!token) {
-      const authRes = await googleSignIn();
-      token = authRes?.accessToken || null;
-    }
-    if (!token) throw new Error('Autenticação com Google necessária.');
+    const token = await getAccessToken();
+    if (!token) throw new Error('Acesso à API do Google desativado. Para importar, utilize o arquivo Excel (.xlsx).');
 
     setSyncStatus((prev) => ({ ...prev, isSyncing: true }));
     try {
       const pulledItems = await readSpreadsheetRows(token, config.spreadsheetId, config.sheetName);
       if (pulledItems.length > 0) {
         setItems(pulledItems);
-        await batchSaveInventoryFirestore(pulledItems);
-        showToast(`${pulledItems.length} registros importados da planilha e salvos no banco.`);
+        await resetInventoryFirestore(pulledItems);
+        showToast(`${pulledItems.length} registros importados da planilha e sincronizados no banco.`);
       } else {
         showToast('Nenhuma linha de dados encontrada na planilha central.', 'info');
       }
@@ -488,7 +446,6 @@ export default function App() {
 
       {/* Top Navbar */}
       <Navbar
-        currentUser={currentUser}
         config={config}
         syncStatus={syncStatus}
         onOpenNewItem={() => {
@@ -497,77 +454,31 @@ export default function App() {
         }}
         onOpenSyncModal={() => setIsConfigModalOpen(true)}
         onQuickSync={handleSyncAll}
-        onSignIn={handleSignIn}
-        onSignOut={handleSignOut}
       />
 
-      {/* Hero / Mobile Field Banner */}
-      <div className="bg-gradient-to-b from-blue-50/70 to-transparent border-b border-blue-100/50">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <Tablet className="w-3.5 h-3.5" />
-                  <span>Otimizado para Celular & Tablet</span>
-                </div>
-                {/* Database active badge */}
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  <Database className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Banco de Dados Cloud Firestore: Ativo e Permanente</span>
-                </div>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                Controle Central de Equipamentos e Inventário
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-2xl">
-                Todos os dados inseridos são salvos automaticamente no banco de dados na nuvem e
-                alimentam a planilha de controle central em tempo real.
-              </p>
-            </div>
-
-            {/* Quick Action Cards */}
-            <div className="flex items-center gap-2">
-              {config?.spreadsheetId ? (
-                <a
-                  href={config.spreadsheetUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-300 rounded-xl text-xs sm:text-sm font-semibold shadow-xs transition-colors"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                  <span>Ver Planilha Central</span>
-                  <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsConfigModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.02]"
-                >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>Conectar Google Sheets</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Page Header */}
+        <div className="mb-6">
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            Painel de Controle e Inventário
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+            Gestão de estações de trabalho, equipamentos e termos de responsabilidade
+          </p>
+        </div>
+
         {/* KPI Dashboard */}
         <DashboardStats
           items={items}
-          config={config}
-          onOpenSyncModal={() => setIsConfigModalOpen(true)}
+          onSelectCategory={setActiveCategoryTab}
         />
 
         {/* Inventory Table and Cards */}
         <InventoryTable
           items={items}
+          activeCategory={activeCategoryTab}
+          onCategoryChange={setActiveCategoryTab}
           onEdit={(item) => {
             setEditingItem(item);
             setIsItemModalOpen(true);
@@ -616,11 +527,7 @@ export default function App() {
         isOpen={isConfigModalOpen}
         onClose={() => setIsConfigModalOpen(false)}
         config={config}
-        currentUser={currentUser}
         syncStatus={syncStatus}
-        onSignIn={handleSignIn}
-        onSignOut={handleSignOut}
-        onCreateNewSheet={handleCreateNewSheet}
         onLinkExistingSheet={handleLinkExistingSheet}
         onSyncAll={handleSyncAll}
         onPullFromSheet={handlePullFromSheet}
