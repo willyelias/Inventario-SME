@@ -113,6 +113,7 @@ export function hasPendingInfo(item: InventoryItem): boolean {
 export function deduplicateInventory(items: InventoryItem[]): InventoryItem[] {
   const seenIds = new Set<string>();
   const seenSerials = new Map<string, number>();
+  const seenNbSerials = new Map<string, number>();
   const result: InventoryItem[] = [];
 
   for (const item of items) {
@@ -134,6 +135,18 @@ export function deduplicateInventory(items: InventoryItem[]): InventoryItem[] {
         continue;
       }
       seenSerials.set(normSerial, result.length);
+    }
+
+    // Para itens avulsos que só possuem nobreak cadastrado (sem PC, sem monitor e sem serial de máquina)
+    const normNb = String(item.nobreakSerial || '').trim().toUpperCase();
+    const normNome = String(item.nome || '').trim().toUpperCase();
+    const normM1 = String(item.monitor1Serial || '').trim().toUpperCase();
+    const isOnlyNobreak = (!normSerial || normSerial === '-') && (!normNome || normNome === '-') && (!normM1 || normM1 === '-');
+    if (isOnlyNobreak && normNb && normNb !== '-' && normNb.length > 3) {
+      if (seenNbSerials.has(normNb)) {
+        continue;
+      }
+      seenNbSerials.set(normNb, result.length);
     }
 
     result.push(item);
@@ -162,10 +175,14 @@ export function reconcileInventory(
     existingItems.filter((item) => item && !item.id.startsWith('row-'))
   );
 
+  // Deduplicar itens que vieram da planilha para evitar linhas repetidas no próprio arquivo
+  const cleanIncoming = deduplicateInventory(incomingItems);
+
   const existingBySerial = new Map<string, InventoryItem>();
   const existingByHostname = new Map<string, InventoryItem>();
   const existingByPatrimonio = new Map<string, InventoryItem>();
   const existingByMonitor1 = new Map<string, InventoryItem>();
+  const existingByNobreakOnly = new Map<string, InventoryItem>();
 
   const extractPatrimonio = (str?: string): string => {
     if (!str) return '';
@@ -190,6 +207,11 @@ export function reconcileInventory(
     if (m1 && m1 !== '-' && m1.length > 2 && !isPrinterItem(item)) {
       existingByMonitor1.set(m1, item);
     }
+    const nb = String(item.nobreakSerial || '').trim().toUpperCase();
+    const isOnlyNb = (!s || s === '-') && (!h || h === '-') && (!m1 || m1 === '-');
+    if (isOnlyNb && nb && nb !== '-' && nb.length > 3) {
+      existingByNobreakOnly.set(nb, item);
+    }
   });
 
   const matchedExistingIds = new Set<string>();
@@ -200,13 +222,15 @@ export function reconcileInventory(
   let maxItemNumber = cleanExisting.reduce((max, i) => Math.max(max, i.itemNumber || 0), 0);
 
   // 2. Processar itens que vieram da planilha importada
-  for (const inc of incomingItems) {
+  for (const inc of cleanIncoming) {
     if (!inc) continue;
 
     const incSerial = String(inc.serial || '').trim().toUpperCase();
     const incNome = String(inc.nome || '').trim().toUpperCase();
     const incPat = extractPatrimonio(inc.observacoes);
     const incM1 = String(inc.monitor1Serial || '').trim().toUpperCase();
+    const incNb = String(inc.nobreakSerial || '').trim().toUpperCase();
+    const isIncOnlyNb = (!incSerial || incSerial === '-') && (!incNome || incNome === '-') && (!incM1 || incM1 === '-');
 
     let match: InventoryItem | undefined;
 
@@ -237,6 +261,14 @@ export function reconcileInventory(
     // Regra 4: Monitor 1 Serial (para computadores sem serial ou hostname cadastrado)
     if (!match && !isPrinterItem(inc) && incM1 && incM1 !== '-' && existingByMonitor1.has(incM1)) {
       const candidate = existingByMonitor1.get(incM1);
+      if (candidate && !matchedExistingIds.has(candidate.id)) {
+        match = candidate;
+      }
+    }
+
+    // Regra 5: Nobreak Serial para itens somente nobreak
+    if (!match && isIncOnlyNb && incNb && incNb !== '-' && existingByNobreakOnly.has(incNb)) {
+      const candidate = existingByNobreakOnly.get(incNb);
       if (candidate && !matchedExistingIds.has(candidate.id)) {
         match = candidate;
       }
@@ -295,11 +327,14 @@ export function reconcileInventory(
     }
   }
 
-  // 4. Ordenação e reindexação limpa de itemNumber:
+  // 4. Garantir deduplicação final
+  const dedupedFinal = deduplicateInventory(finalItems);
+
+  // 5. Ordenação e reindexação limpa de itemNumber:
   // Coloca primeiro todos os computadores na ordem da planilha,
   // seguido por todas as impressoras na ordem da planilha.
-  const comps = finalItems.filter((i) => !isPrinterItem(i));
-  const printers = finalItems.filter(isPrinterItem);
+  const comps = dedupedFinal.filter((i) => !isPrinterItem(i));
+  const printers = dedupedFinal.filter(isPrinterItem);
 
   let seqNumber = 1;
   comps.forEach((c) => {
