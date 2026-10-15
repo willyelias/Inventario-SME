@@ -179,8 +179,7 @@ export function parseFlexibleRow(
 
   // Find matching existing item for stable ID and preserved local states
   const matchedExisting = existingItems?.find(
-    (e) => (rawSerial && e.serial && e.serial.toLowerCase().trim() === rawSerial.toLowerCase().trim()) ||
-           (e.itemNumber === itemNumber)
+    (e) => rawSerial && e.serial && String(e.serial).toLowerCase().trim() === rawSerial.toLowerCase().trim()
   );
 
   return {
@@ -313,11 +312,6 @@ export function parseXlsxBuffer(
         if (!setor && !marca && !modelo && !serial) continue;
 
         const currentNum = itemCounter++;
-        const matchedExisting = existingItems?.find(
-          (e) => (serial && e.serial && e.serial.toLowerCase().trim() === serial.toLowerCase().trim()) ||
-                 (e.itemNumber === currentNum)
-        );
-
         let observacoes = '';
         if (patVal) {
           observacoes = patVal.toUpperCase().startsWith('PATRIMÔNIO') || patVal.toUpperCase().startsWith('PATRIMONIO')
@@ -326,7 +320,7 @@ export function parseXlsxBuffer(
         }
 
         allItems.push({
-          id: matchedExisting ? matchedExisting.id : `inv-${currentNum}`,
+          id: `sheet-${currentNum}`,
           itemNumber: currentNum,
           setor,
           sala,
@@ -346,10 +340,10 @@ export function parseXlsxBuffer(
           funcao: '-',
           termoAssinado: 'NÃO',
           observacoes,
-          signatureDataUrl: matchedExisting?.signatureDataUrl,
+          signatureDataUrl: '',
           syncedToGoogleSheet: true,
           sheetRowIndex: currentNum + 1,
-          createdAt: matchedExisting?.createdAt || new Date().toISOString(),
+          createdAt: new Date().toISOString(),
           updatedAt: new Date().toLocaleString('pt-BR')
         });
       } else {
@@ -361,11 +355,6 @@ export function parseXlsxBuffer(
         if (!setor && !marca && !modelo && !serial) continue;
 
         const currentNum = itemCounter++;
-        const matchedExisting = existingItems?.find(
-          (e) => (serial && e.serial && e.serial.toLowerCase().trim() === serial.toLowerCase().trim()) ||
-                 (e.itemNumber === currentNum)
-        );
-
         const sala = getVal('SALA', 'LOCAL');
         const nome = getVal('NOME', 'HOSTNAME', 'COMPUTADOR');
         const m1s = getVal('MONITOR 1 (SERIAL)', 'MONITOR 1', 'SERIAL MONITOR 1') || '-';
@@ -396,7 +385,7 @@ export function parseXlsxBuffer(
         }
 
         allItems.push({
-          id: matchedExisting ? matchedExisting.id : `inv-${currentNum}`,
+          id: `sheet-${currentNum}`,
           itemNumber: currentNum,
           setor,
           sala,
@@ -411,15 +400,15 @@ export function parseXlsxBuffer(
           adaptador: isRowPrinter ? 'NÃO' : adapt,
           nobreakModelo: isRowPrinter ? '-' : nbMod,
           nobreakSerial: isRowPrinter ? '-' : nbSer,
-          responsavel: isRowPrinter ? (resp || '-') : resp,
-          matriculaCpf: isRowPrinter ? (mat || '-') : mat,
-          funcao: isRowPrinter ? (func || '-') : func,
+          responsavel: isRowPrinter ? '-' : (resp || '-'),
+          matriculaCpf: isRowPrinter ? '-' : (mat || '-'),
+          funcao: isRowPrinter ? '-' : (func || '-'),
           termoAssinado: isRowPrinter ? 'NÃO' : termo,
           observacoes: obs,
-          signatureDataUrl: matchedExisting?.signatureDataUrl,
+          signatureDataUrl: '',
           syncedToGoogleSheet: true,
           sheetRowIndex: currentNum + 1,
-          createdAt: matchedExisting?.createdAt || new Date().toISOString(),
+          createdAt: new Date().toISOString(),
           updatedAt: new Date().toLocaleString('pt-BR')
         });
       }

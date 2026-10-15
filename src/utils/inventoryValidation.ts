@@ -122,7 +122,7 @@ export function deduplicateInventory(items: InventoryItem[]): InventoryItem[] {
     seenIds.add(item.id);
 
     // Verifica serial normalizado (se válido e não for marcador '-')
-    const normSerial = (item.serial || '').trim().toUpperCase();
+    const normSerial = String(item.serial || '').trim().toUpperCase();
     if (normSerial && normSerial !== '-' && normSerial.length > 2) {
       if (seenSerials.has(normSerial)) {
         const existingIdx = seenSerials.get(normSerial)!;
@@ -145,9 +145,9 @@ export function deduplicateInventory(items: InventoryItem[]): InventoryItem[] {
 /**
  * Reconcilia os itens existentes com os dados importados de uma planilha:
  * - Atualiza registros existentes (mantendo ID estável e assinaturas)
- * - Inclui como novos apenas os registros que faltavam no inventário
+ * - Inclui como novos os registros que faltavam no inventário (sem descartar linhas)
  * - Preserva os itens existentes que não vieram na planilha
- * - Elimina qualquer possibilidade de duplicação
+ * - Elimina duplicações e assegura numeração contínua
  */
 export function reconcileInventory(
   existingItems: InventoryItem[],
@@ -164,28 +164,31 @@ export function reconcileInventory(
 
   const existingBySerial = new Map<string, InventoryItem>();
   const existingByHostname = new Map<string, InventoryItem>();
-  const existingById = new Map<string, InventoryItem>();
   const existingByPatrimonio = new Map<string, InventoryItem>();
+  const existingByMonitor1 = new Map<string, InventoryItem>();
 
   const extractPatrimonio = (str?: string): string => {
     if (!str) return '';
-    const match = str.match(/\b\d{4,8}\b/);
+    const match = String(str).match(/\b\d{4,8}\b/);
     return match ? match[0] : '';
   };
 
   cleanExisting.forEach((item) => {
-    existingById.set(item.id, item);
-    const s = (item.serial || '').trim().toUpperCase();
+    const s = String(item.serial || '').trim().toUpperCase();
     if (s && s !== '-' && s.length > 2) {
       existingBySerial.set(s, item);
     }
-    const h = (item.nome || '').trim().toUpperCase();
+    const h = String(item.nome || '').trim().toUpperCase();
     if (h && h !== '-' && h !== 'IMPRESSORA' && h.length > 2) {
       existingByHostname.set(h, item);
     }
     const pat = extractPatrimonio(item.observacoes);
     if (pat && isPrinterItem(item)) {
       existingByPatrimonio.set(pat, item);
+    }
+    const m1 = String(item.monitor1Serial || '').trim().toUpperCase();
+    if (m1 && m1 !== '-' && m1.length > 2 && !isPrinterItem(item)) {
+      existingByMonitor1.set(m1, item);
     }
   });
 
@@ -200,33 +203,46 @@ export function reconcileInventory(
   for (const inc of incomingItems) {
     if (!inc) continue;
 
-    const incSerial = (inc.serial || '').trim().toUpperCase();
-    const incNome = (inc.nome || '').trim().toUpperCase();
+    const incSerial = String(inc.serial || '').trim().toUpperCase();
+    const incNome = String(inc.nome || '').trim().toUpperCase();
     const incPat = extractPatrimonio(inc.observacoes);
+    const incM1 = String(inc.monitor1Serial || '').trim().toUpperCase();
 
     let match: InventoryItem | undefined;
 
     // Regra 1: Serial exato
     if (incSerial && incSerial !== '-' && incSerial.length > 2 && existingBySerial.has(incSerial)) {
-      match = existingBySerial.get(incSerial);
+      const candidate = existingBySerial.get(incSerial);
+      if (candidate && !matchedExistingIds.has(candidate.id)) {
+        match = candidate;
+      }
     }
 
     // Regra 2: Patrimônio de impressora
     if (!match && isPrinterItem(inc) && incPat && existingByPatrimonio.has(incPat)) {
-      match = existingByPatrimonio.get(incPat);
+      const candidate = existingByPatrimonio.get(incPat);
+      if (candidate && !matchedExistingIds.has(candidate.id)) {
+        match = candidate;
+      }
     }
 
     // Regra 3: Hostname do computador
-    if (!match && incNome && incNome !== '-' && incNome !== 'IMPRESSORA' && existingByHostname.has(incNome)) {
-      match = existingByHostname.get(incNome);
+    if (!match && !isPrinterItem(inc) && incNome && incNome !== '-' && incNome !== 'IMPRESSORA' && existingByHostname.has(incNome)) {
+      const candidate = existingByHostname.get(incNome);
+      if (candidate && !matchedExistingIds.has(candidate.id)) {
+        match = candidate;
+      }
     }
 
-    // Regra 4: Por ID se coincidir
-    if (!match && inc.id && existingById.has(inc.id)) {
-      match = existingById.get(inc.id);
+    // Regra 4: Monitor 1 Serial (para computadores sem serial ou hostname cadastrado)
+    if (!match && !isPrinterItem(inc) && incM1 && incM1 !== '-' && existingByMonitor1.has(incM1)) {
+      const candidate = existingByMonitor1.get(incM1);
+      if (candidate && !matchedExistingIds.has(candidate.id)) {
+        match = candidate;
+      }
     }
 
-    if (match && !matchedExistingIds.has(match.id)) {
+    if (match) {
       // ATUALIZAÇÃO DO REGISTRO EXISTENTE
       matchedExistingIds.add(match.id);
       updatedCount++;
@@ -256,7 +272,7 @@ export function reconcileInventory(
         signatureDataUrl: match.signatureDataUrl || inc.signatureDataUrl || '',
         updatedAt: new Date().toLocaleString('pt-BR')
       });
-    } else if (!match) {
+    } else {
       // INCLUSÃO DO QUE FALTAVA (NOVO EQUIPAMENTO)
       addedCount++;
       maxItemNumber++;
@@ -266,6 +282,7 @@ export function reconcileInventory(
         ...inc,
         id: newId,
         itemNumber: maxItemNumber,
+        signatureDataUrl: inc.signatureDataUrl || '',
         updatedAt: new Date().toLocaleString('pt-BR')
       });
     }
@@ -278,11 +295,24 @@ export function reconcileInventory(
     }
   }
 
-  // 4. Ordenar sequencialmente por itemNumber
-  finalItems.sort((a, b) => a.itemNumber - b.itemNumber);
+  // 4. Ordenação e reindexação limpa de itemNumber:
+  // Coloca primeiro todos os computadores na ordem da planilha,
+  // seguido por todas as impressoras na ordem da planilha.
+  const comps = finalItems.filter((i) => !isPrinterItem(i));
+  const printers = finalItems.filter(isPrinterItem);
+
+  let seqNumber = 1;
+  comps.forEach((c) => {
+    c.itemNumber = seqNumber++;
+  });
+  printers.forEach((p) => {
+    p.itemNumber = seqNumber++;
+  });
+
+  const orderedItems = [...comps, ...printers];
 
   return {
-    reconciled: finalItems,
+    reconciled: orderedItems,
     updatedCount,
     addedCount
   };
