@@ -1,1 +1,54 @@
 @import "tailwindcss";
+
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Oculta elementos que não devem sair na impressão */
+  header,
+  nav,
+  .no-print,
+  .print-hidden,
+  button,
+  .toast-container {
+    display: none !important;
+  }
+
+  /* O container do relatório ocupa 100% sem sombras de tela */
+  #printable-report-area {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+
+  /* Evita quebras indesejadas no meio de uma linha de tabela ou card */
+  tr, .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  @page {
+    margin: 8mm 8mm;
+    size: auto;
+  }
+}

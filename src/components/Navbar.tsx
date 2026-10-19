@@ -3,13 +3,16 @@ import {
   Monitor,
   Plus,
   FileSpreadsheet,
-  RefreshCw
+  RefreshCw,
+  BarChart3
 } from 'lucide-react';
 import { GoogleSheetConfig, SyncStatus } from '../types/inventory';
 
 interface NavbarProps {
   config: GoogleSheetConfig | null;
   syncStatus: SyncStatus;
+  currentView?: 'inventory' | 'reports';
+  onChangeView?: (view: 'inventory' | 'reports') => void;
   onOpenNewItem: () => void;
   onOpenSyncModal: () => void;
   onQuickSync: () => void;
@@ -18,12 +21,14 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   config,
   syncStatus,
+  currentView = 'inventory',
+  onChangeView,
   onOpenNewItem,
   onOpenSyncModal,
   onQuickSync
 }) => {
   return (
-    <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80">
+    <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 no-print">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
         {/* Brand */}
         <div className="flex items-center gap-3">
@@ -43,6 +48,35 @@ export const Navbar: React.FC<NavbarProps> = ({
               Gestão Centralizada de Equipamentos e Ativos
             </p>
           </div>
+        </div>
+
+        {/* Center Navigation Tabs (Inventário x Relatórios) */}
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <button
+            type="button"
+            onClick={() => onChangeView?.('inventory')}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              currentView === 'inventory'
+                ? 'bg-white text-slate-900 shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Monitor className="w-3.5 h-3.5 text-blue-600" />
+            <span>Inventário</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeView?.('reports')}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              currentView === 'reports'
+                ? 'bg-white text-blue-600 shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden sm:inline">Relatórios & Gráficos</span>
+            <span className="sm:hidden">Relatórios</span>
+          </button>
         </div>
 
         {/* Center / Right controls */}

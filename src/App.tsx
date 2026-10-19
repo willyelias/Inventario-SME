@@ -36,6 +36,7 @@ import { ItemFormModal } from './components/ItemFormModal';
 import { GoogleSheetsConfigModal } from './components/GoogleSheetsConfigModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { SignatureModal } from './components/SignatureModal';
+import { ReportsView } from './components/ReportsView';
 import {
   Plus,
   CheckCircle2,
@@ -55,6 +56,9 @@ const STORAGE_KEY_CONFIG = 'inventario_ti_sheets_config_v1';
 export default function App() {
   // Category Tab Selection ('COMPUTADORES' | 'IMPRESSORAS' | 'TODOS')
   const [activeCategoryTab, setActiveCategoryTab] = useState<'COMPUTADORES' | 'IMPRESSORAS' | 'TODOS'>('COMPUTADORES');
+
+  // Main View Switcher ('inventory' | 'reports')
+  const [currentView, setCurrentView] = useState<'inventory' | 'reports'>('inventory');
 
   // Firestore Database status
   const [isDatabaseConnected, setIsDatabaseConnected] = useState<boolean>(true);
@@ -448,6 +452,8 @@ export default function App() {
       <Navbar
         config={config}
         syncStatus={syncStatus}
+        currentView={currentView}
+        onChangeView={setCurrentView}
         onOpenNewItem={() => {
           setEditingItem(null);
           setIsItemModalOpen(true);
@@ -458,40 +464,54 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Page Header */}
-        <div className="mb-6">
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-            Painel de Controle e Inventário
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Gestão de estações de trabalho, equipamentos e termos de responsabilidade
-          </p>
-        </div>
+        {currentView === 'reports' ? (
+          <ReportsView
+            items={items}
+            onBackToInventory={() => setCurrentView('inventory')}
+            onEditItem={(item) => {
+              setEditingItem(item);
+              setIsItemModalOpen(true);
+            }}
+          />
+        ) : (
+          <>
+            {/* Page Header */}
+            <div className="mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+                Painel de Controle e Inventário
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                Gestão de estações de trabalho, equipamentos e termos de responsabilidade
+              </p>
+            </div>
 
-        {/* KPI Dashboard */}
-        <DashboardStats
-          items={items}
-          onSelectCategory={setActiveCategoryTab}
-        />
+            {/* KPI Dashboard */}
+            <DashboardStats
+              items={items}
+              onSelectCategory={setActiveCategoryTab}
+            />
 
-        {/* Inventory Table and Cards */}
-        <InventoryTable
-          items={items}
-          activeCategory={activeCategoryTab}
-          onCategoryChange={setActiveCategoryTab}
-          onEdit={(item) => {
-            setEditingItem(item);
-            setIsItemModalOpen(true);
-          }}
-          onDeleteRequest={(item) => {
-            setItemToDelete(item);
-            setIsDeleteModalOpen(true);
-          }}
-          onQuickSign={(item) => {
-            setQuickSignItem(item);
-            setIsQuickSignatureOpen(true);
-          }}
-        />
+            {/* Inventory Table and Cards */}
+            <InventoryTable
+              items={items}
+              activeCategory={activeCategoryTab}
+              onCategoryChange={setActiveCategoryTab}
+              onOpenReports={() => setCurrentView('reports')}
+              onEdit={(item) => {
+                setEditingItem(item);
+                setIsItemModalOpen(true);
+              }}
+              onDeleteRequest={(item) => {
+                setItemToDelete(item);
+                setIsDeleteModalOpen(true);
+              }}
+              onQuickSign={(item) => {
+                setQuickSignItem(item);
+                setIsQuickSignatureOpen(true);
+              }}
+            />
+          </>
+        )}
       </main>
 
       {/* Mobile Floating Action Button */}

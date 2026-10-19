@@ -23,6 +23,7 @@ import {
   Printer,
   Eye,
   Laptop,
+  BarChart3,
   Layers
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -35,6 +36,7 @@ interface InventoryTableProps {
   initialPendenciaFilter?: 'TODOS' | 'PENDENTES' | 'COMPLETOS';
   activeCategory?: 'COMPUTADORES' | 'IMPRESSORAS' | 'TODOS';
   onCategoryChange?: (category: 'COMPUTADORES' | 'IMPRESSORAS' | 'TODOS') => void;
+  onOpenReports?: () => void;
 }
 
 type SortColumn =
@@ -57,7 +59,8 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
   onQuickSign,
   initialPendenciaFilter = 'TODOS',
   activeCategory: propActiveCategory,
-  onCategoryChange
+  onCategoryChange,
+  onOpenReports
 }) => {
   // Main Category Tab State (Computadores, Impressoras, Todos)
   const [internalCategory, setInternalCategory] = useState<'COMPUTADORES' | 'IMPRESSORAS' | 'TODOS'>('COMPUTADORES');
@@ -596,6 +599,18 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Exportar Excel</span>
               </button>
+
+              {onOpenReports && (
+                <button
+                  type="button"
+                  onClick={onOpenReports}
+                  className="px-2.5 sm:px-3 py-1.5 bg-blue-50 hover:bg-blue-100/80 border border-blue-300 rounded-xl text-xs font-semibold text-blue-800 flex items-center gap-1.5 shadow-2xs transition-colors"
+                  title="Abrir painel de relatórios gráficos e impressão customizada"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Relatórios & Impressão</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
