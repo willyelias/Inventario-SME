@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import {
   BarChart3,
   Printer,
@@ -23,7 +24,9 @@ import {
   X,
   FileCheck2,
   Eye,
-  Settings2
+  Settings2,
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 import { InventoryItem } from '../types/inventory';
 import { isPrinterItem, hasPendingInfo } from '../utils/inventoryValidation';
@@ -226,6 +229,126 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     window.print();
   };
 
+  // Format cell value according to column key
+  const getCellValue = (item: InventoryItem, idx: number, key: string): string => {
+    const isPrinter = isPrinterItem(item);
+    switch (key) {
+      case 'itemNumber':
+        return String(item.itemNumber || idx + 1);
+      case 'setor':
+        return item.setor || '';
+      case 'sala':
+        return item.sala || '';
+      case 'marcaModelo':
+        return [item.marca, item.modelo].filter(Boolean).join(' ') || '';
+      case 'nome':
+        return item.nome || (isPrinter ? 'IMPRESSORA' : '');
+      case 'serial':
+        return item.serial || '';
+      case 'monitores':
+        if (isPrinter) return '-';
+        const m1 = item.monitor1Serial && item.monitor1Serial !== '-' ? `M1: ${item.monitor1Serial}${item.monitor1Marca ? ` (${item.monitor1Marca})` : ''}` : '';
+        const m2 = item.monitor2Serial && item.monitor2Serial !== '-' ? `M2: ${item.monitor2Serial}${item.monitor2Marca ? ` (${item.monitor2Marca})` : ''}` : '';
+        return [m1, m2].filter(Boolean).join(' | ') || 'Sem monitor';
+      case 'nobreak':
+        if (!item.nobreakModelo || item.nobreakModelo === '-') return '-';
+        return `${item.nobreakModelo}${item.nobreakSerial && item.nobreakSerial !== '-' ? ` (S/N: ${item.nobreakSerial})` : ''}`;
+      case 'responsavel':
+        return item.responsavel && item.responsavel !== '-' ? item.responsavel : '';
+      case 'matriculaCargo': {
+        const mat = item.matriculaCpf && item.matriculaCpf !== '-' ? `Matr: ${item.matriculaCpf}` : '';
+        const func = item.funcao && item.funcao !== '-' ? item.funcao : '';
+        return [mat, func].filter(Boolean).join(' - ');
+      }
+      case 'termoAssinado':
+        return isPrinter ? '-' : (item.termoAssinado || '');
+      case 'observacoes':
+        return item.observacoes || '';
+      default:
+        return '';
+    }
+  };
+
+  // Export report to Excel (.xlsx)
+  const handleDownloadExcel = () => {
+    if (printableItems.length === 0) {
+      alert('Não há itens para exportar no relatório atual.');
+      return;
+    }
+
+    const activeCols = columns.filter((c) => c.enabled);
+    if (activeCols.length === 0) {
+      alert('Selecione pelo menos uma coluna para exportar a planilha.');
+      return;
+    }
+
+    const headers = activeCols.map((c) => c.label);
+    const dataRows = printableItems.map((item, idx) =>
+      activeCols.map((col) => getCellValue(item, idx, col.key))
+    );
+
+    const sheetData = [headers, ...dataRows];
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+
+    // Auto calculate column widths
+    const colWidths = activeCols.map((col, colIdx) => {
+      let maxLen = col.label.length;
+      for (let r = 0; r < Math.min(dataRows.length, 100); r++) {
+        const valStr = String(dataRows[r][colIdx] || '');
+        if (valStr.length > maxLen) maxLen = valStr.length;
+      }
+      return { wch: Math.min(Math.max(maxLen + 3, 10), 45) };
+    });
+    worksheet['!cols'] = colWidths;
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Relatório SME');
+
+    const catSlug = filterCategory.toLowerCase();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const fileName = `relatorio_inventario_sme_${catSlug}_${dateStr}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+  };
+
+  // Export report to CSV (.csv)
+  const handleDownloadCSV = () => {
+    if (printableItems.length === 0) {
+      alert('Não há itens para exportar no relatório atual.');
+      return;
+    }
+
+    const activeCols = columns.filter((c) => c.enabled);
+    if (activeCols.length === 0) {
+      alert('Selecione pelo menos uma coluna para exportar o CSV.');
+      return;
+    }
+
+    const headers = activeCols.map((c) => c.label);
+    const dataRows = printableItems.map((item, idx) =>
+      activeCols.map((col) => {
+        const val = getCellValue(item, idx, col.key);
+        if (val.includes(';') || val.includes('"') || val.includes('\n')) {
+          return `"${val.replace(/"/g, '""')}"`;
+        }
+        return val;
+      })
+    );
+
+    const csvContent = '\uFEFF' + [headers.join(';'), ...dataRows.map((r) => r.join(';'))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const catSlug = filterCategory.toLowerCase();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.setAttribute('download', `relatorio_inventario_sme_${catSlug}_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner Navigation & View Switcher (Screen Only) */}
@@ -256,7 +379,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         {/* View Mode Buttons */}
-        <div className="flex items-center gap-2 self-start md:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
           <div className="inline-flex rounded-xl p-1 bg-slate-100 border border-slate-200">
             <button
               type="button"
@@ -286,6 +409,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               )}
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={handleDownloadExcel}
+            className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-emerald-600/30 transition-all active:scale-95 cursor-pointer"
+            title="Baixar dados do relatório em formato de planilha Excel (.xlsx)"
+          >
+            <FileSpreadsheet className="w-4 h-4 stroke-[2.5]" />
+            <span>Baixar Planilha (.xlsx)</span>
+          </button>
 
           {activeSubTab === 'print' && (
             <button
@@ -501,24 +634,35 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
           </div>
 
-          {/* Quick Action to Print */}
+          {/* Quick Action to Print & Export */}
           <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
             <div className="space-y-1 text-center sm:text-left">
               <h4 className="text-base font-bold flex items-center justify-center sm:justify-start gap-2">
                 <Printer className="w-5 h-5 text-blue-400" />
-                Precisa de um relatório impresso ou salvar em PDF?
+                Precisa de um relatório impresso ou baixar em planilha?
               </h4>
               <p className="text-xs text-blue-200">
-                Personalize títulos, colunas, filtros e visualize na folha A4 em tempo real antes de imprimir.
+                Personalize títulos, colunas, filtros e visualize na folha A4 em tempo real antes de imprimir ou baixe direto em Excel.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setActiveSubTab('print')}
-              className="px-5 py-2.5 bg-white hover:bg-blue-50 text-blue-900 rounded-xl text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-95 shrink-0"
-            >
-              Abrir Relatório Customizável →
-            </button>
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleDownloadExcel}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-95 flex items-center gap-2 cursor-pointer"
+                title="Exportar dados do relatório para Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Baixar Planilha (.xlsx)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('print')}
+                className="px-5 py-2.5 bg-white hover:bg-blue-50 text-blue-900 rounded-xl text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-95 cursor-pointer"
+              >
+                Abrir Relatório Customizável →
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -760,7 +904,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {excludedItemIds.size > 0 && (
                 <button
                   type="button"
@@ -774,8 +918,28 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
               <button
                 type="button"
+                onClick={handleDownloadExcel}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md shadow-emerald-600/25 transition-all active:scale-95 cursor-pointer"
+                title="Baixar planilha com as colunas e filtros configurados (.xlsx)"
+              >
+                <FileSpreadsheet className="w-4 h-4 stroke-[2.5]" />
+                <span>Baixar Planilha (.xlsx)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadCSV}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl font-bold transition-all active:scale-95 cursor-pointer"
+                title="Baixar arquivo separado por ponto-e-vírgula (.csv)"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>CSV</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handlePrint}
-                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-600/30 transition-all active:scale-95"
+                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-600/30 transition-all active:scale-95 cursor-pointer"
               >
                 <Printer className="w-4 h-4 stroke-[2.5]" />
                 <span>Imprimir Relatório</span>
