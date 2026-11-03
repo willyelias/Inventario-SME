@@ -37,6 +37,8 @@ import { GoogleSheetsConfigModal } from './components/GoogleSheetsConfigModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { SignatureModal } from './components/SignatureModal';
 import { ReportsView } from './components/ReportsView';
+import { AdminLoginModal } from './components/AdminLoginModal';
+import { isAdminAuthenticated, logoutAdmin } from './services/adminAuth';
 import {
   Plus,
   CheckCircle2,
@@ -126,6 +128,42 @@ export default function App() {
   const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
   const [isQuickSignatureOpen, setIsQuickSignatureOpen] = useState(false);
   const [quickSignItem, setQuickSignItem] = useState<InventoryItem | null>(null);
+
+  // Admin Authentication State
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => isAdminAuthenticated());
+  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState<boolean>(false);
+  const [pendingAdminAction, setPendingAdminAction] = useState<(() => void) | null>(null);
+  const [adminActionDescription, setAdminActionDescription] = useState<string>('');
+
+  // Requires admin login before executing any destructive or mutating operation
+  const executeWithAdminAuth = (
+    action: () => void,
+    description: string = 'Para realizar alterações ou edições no inventário, confirme sua senha de administrador.'
+  ) => {
+    if (isAdminLoggedIn || isAdminAuthenticated()) {
+      setIsAdminLoggedIn(true);
+      action();
+    } else {
+      setAdminActionDescription(description);
+      setPendingAdminAction(() => action);
+      setIsAdminLoginModalOpen(true);
+    }
+  };
+
+  const handleAdminLoginSuccess = () => {
+    setIsAdminLoggedIn(true);
+    showToast('Autenticado com sucesso como Administrador! Alterações liberadas.', 'success');
+    if (pendingAdminAction) {
+      pendingAdminAction();
+      setPendingAdminAction(null);
+    }
+  };
+
+  const handleAdminLogout = () => {
+    logoutAdmin();
+    setIsAdminLoggedIn(false);
+    showToast('Sessão administrativa encerrada. O sistema voltou ao Modo Leitura.', 'info');
+  };
 
   // Test Firestore Connection on Boot
   useEffect(() => {
@@ -454,12 +492,33 @@ export default function App() {
         syncStatus={syncStatus}
         currentView={currentView}
         onChangeView={setCurrentView}
-        onOpenNewItem={() => {
-          setEditingItem(null);
-          setIsItemModalOpen(true);
+        isAdmin={isAdminLoggedIn}
+        onLoginClick={() => {
+          setAdminActionDescription('Autentique-se com sua senha de administrador para habilitar alterações no inventário.');
+          setIsAdminLoginModalOpen(true);
         }}
-        onOpenSyncModal={() => setIsConfigModalOpen(true)}
-        onQuickSync={handleSyncAll}
+        onLogoutClick={handleAdminLogout}
+        onOpenNewItem={() =>
+          executeWithAdminAuth(
+            () => {
+              setEditingItem(null);
+              setIsItemModalOpen(true);
+            },
+            'Informe as credenciais de administrador para cadastrar um novo equipamento.'
+          )
+        }
+        onOpenSyncModal={() =>
+          executeWithAdminAuth(
+            () => setIsConfigModalOpen(true),
+            'Informe as credenciais de administrador para gerenciar a integração com planilhas.'
+          )
+        }
+        onQuickSync={() =>
+          executeWithAdminAuth(
+            handleSyncAll,
+            'Informe as credenciais de administrador para sincronizar dados com o Google Sheets.'
+          )
+        }
       />
 
       {/* Main Container */}
@@ -468,10 +527,15 @@ export default function App() {
           <ReportsView
             items={items}
             onBackToInventory={() => setCurrentView('inventory')}
-            onEditItem={(item) => {
-              setEditingItem(item);
-              setIsItemModalOpen(true);
-            }}
+            onEditItem={(item) =>
+              executeWithAdminAuth(
+                () => {
+                  setEditingItem(item);
+                  setIsItemModalOpen(true);
+                },
+                `Informe as credenciais de administrador para editar o equipamento #${item.itemNumber}.`
+              )
+            }
           />
         ) : (
           <>
@@ -497,18 +561,33 @@ export default function App() {
               activeCategory={activeCategoryTab}
               onCategoryChange={setActiveCategoryTab}
               onOpenReports={() => setCurrentView('reports')}
-              onEdit={(item) => {
-                setEditingItem(item);
-                setIsItemModalOpen(true);
-              }}
-              onDeleteRequest={(item) => {
-                setItemToDelete(item);
-                setIsDeleteModalOpen(true);
-              }}
-              onQuickSign={(item) => {
-                setQuickSignItem(item);
-                setIsQuickSignatureOpen(true);
-              }}
+              onEdit={(item) =>
+                executeWithAdminAuth(
+                  () => {
+                    setEditingItem(item);
+                    setIsItemModalOpen(true);
+                  },
+                  `Informe as credenciais de administrador para editar o equipamento #${item.itemNumber} (${item.serial || item.marca}).`
+                )
+              }
+              onDeleteRequest={(item) =>
+                executeWithAdminAuth(
+                  () => {
+                    setItemToDelete(item);
+                    setIsDeleteModalOpen(true);
+                  },
+                  `Informe as credenciais de administrador para remover o equipamento #${item.itemNumber}.`
+                )
+              }
+              onQuickSign={(item) =>
+                executeWithAdminAuth(
+                  () => {
+                    setQuickSignItem(item);
+                    setIsQuickSignatureOpen(true);
+                  },
+                  `Informe as credenciais de administrador para coletar e salvar a assinatura de ${item.responsavel || 'termo'}.`
+                )
+              }
             />
           </>
         )}
@@ -518,11 +597,16 @@ export default function App() {
       <div className="fixed bottom-4 right-4 z-30 sm:hidden">
         <button
           type="button"
-          onClick={() => {
-            setEditingItem(null);
-            setIsItemModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-5 py-3.5 bg-blue-600 active:bg-blue-700 text-white rounded-full shadow-2xl shadow-blue-600/40 text-sm font-bold border-2 border-white transition-all transform active:scale-95"
+          onClick={() =>
+            executeWithAdminAuth(
+              () => {
+                setEditingItem(null);
+                setIsItemModalOpen(true);
+              },
+              'Informe as credenciais de administrador para cadastrar um novo equipamento.'
+            )
+          }
+          className="flex items-center gap-2 px-5 py-3.5 bg-blue-600 active:bg-blue-700 text-white rounded-full shadow-2xl shadow-blue-600/40 text-sm font-bold border-2 border-white transition-all transform active:scale-95 cursor-pointer"
         >
           <Plus className="w-5 h-5 stroke-[2.5]" />
           <span>Novo Equipamento</span>
@@ -577,6 +661,17 @@ export default function App() {
         }}
         onSave={handleSaveQuickSignature}
         responsavelNome={quickSignItem?.responsavel || ''}
+      />
+
+      {/* 5. Admin Authentication Modal */}
+      <AdminLoginModal
+        isOpen={isAdminLoginModalOpen}
+        onClose={() => {
+          setIsAdminLoginModalOpen(false);
+          setPendingAdminAction(null);
+        }}
+        onSuccess={handleAdminLoginSuccess}
+        actionDescription={adminActionDescription}
       />
     </div>
   );

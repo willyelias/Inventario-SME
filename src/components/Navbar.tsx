@@ -4,7 +4,10 @@ import {
   Plus,
   FileSpreadsheet,
   RefreshCw,
-  BarChart3
+  BarChart3,
+  Lock,
+  ShieldCheck,
+  LogOut
 } from 'lucide-react';
 import { GoogleSheetConfig, SyncStatus } from '../types/inventory';
 
@@ -16,6 +19,9 @@ interface NavbarProps {
   onOpenNewItem: () => void;
   onOpenSyncModal: () => void;
   onQuickSync: () => void;
+  isAdmin?: boolean;
+  onLoginClick?: () => void;
+  onLogoutClick?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -25,7 +31,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onChangeView,
   onOpenNewItem,
   onOpenSyncModal,
-  onQuickSync
+  onQuickSync,
+  isAdmin = false,
+  onLoginClick,
+  onLogoutClick
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 no-print">
@@ -119,6 +128,37 @@ export const Navbar: React.FC<NavbarProps> = ({
               <RefreshCw
                 className={`w-3.5 h-3.5 ${syncStatus.isSyncing ? 'animate-spin text-blue-600' : ''}`}
               />
+            </button>
+          )}
+
+          {/* Admin / Read-Only Status Indicator */}
+          {isAdmin ? (
+            <div className="flex items-center gap-1.5 pl-0.5">
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold shadow-2xs"
+                title="Sessão administrativa ativa: você tem permissão para alterar, criar e excluir equipamentos"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden sm:inline">Admin</span>
+              </span>
+              <button
+                type="button"
+                onClick={onLogoutClick}
+                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                title="Sair do modo administrador e bloquear alterações"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onLoginClick}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+              title="Inventário em Modo Leitura. Clique para autenticar como administrador."
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span className="hidden sm:inline">Modo Leitura</span>
             </button>
           )}
 
