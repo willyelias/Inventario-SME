@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { InventoryItem } from '../types/inventory';
 import { isPrinterItem, hasPendingInfo } from '../utils/inventoryValidation';
+import { sanitizeCellValue } from '../utils/security';
 
 interface ReportsViewProps {
   items: InventoryItem[];
@@ -284,7 +285,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
     const headers = activeCols.map((c) => c.label);
     const dataRows = printableItems.map((item, idx) =>
-      activeCols.map((col) => getCellValue(item, idx, col.key))
+      activeCols.map((col) => sanitizeCellValue(getCellValue(item, idx, col.key)))
     );
 
     const sheetData = [headers, ...dataRows];
@@ -327,7 +328,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     const headers = activeCols.map((c) => c.label);
     const dataRows = printableItems.map((item, idx) =>
       activeCols.map((col) => {
-        const val = getCellValue(item, idx, col.key);
+        const val = sanitizeCellValue(getCellValue(item, idx, col.key));
         if (val.includes(';') || val.includes('"') || val.includes('\n')) {
           return `"${val.replace(/"/g, '""')}"`;
         }

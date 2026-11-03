@@ -10,10 +10,6 @@ service cloud.firestore {
       return request.resource.data;
     }
 
-    function existing() {
-      return resource.data;
-    }
-
     function isSignedIn() {
       return request.auth != null;
     }
@@ -22,26 +18,35 @@ service cloud.firestore {
       return data.itemNumber is number
         && data.setor is string && data.setor.size() <= 100
         && data.serial is string && data.serial.size() <= 150
-        && data.termoAssinado in ['SIM', 'NÃO', 'PENDENTE'];
+        && (!('termoAssinado' in data) || data.termoAssinado in ['SIM', 'NÃO', 'PENDENTE', 'NO'])
+        && (!('marca' in data) || (data.marca is string && data.marca.size() <= 100))
+        && (!('modelo' in data) || (data.modelo is string && data.modelo.size() <= 100))
+        && (!('responsavel' in data) || (data.responsavel is string && data.responsavel.size() <= 200))
+        && (!('observacoes' in data) || (data.observacoes is string && data.observacoes.size() <= 2000));
     }
 
-    // Default deny
+    // Default deny all
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Inventory items collection
+    // Inventory items collection:
+    // Structural schema validation on create and update to prevent payload injection
     match /inventory/{itemId} {
       allow read: if true;
       allow create: if isValidId(itemId) && isValidInventory(incoming());
       allow update: if isValidId(itemId) && isValidInventory(incoming());
-      allow delete: if isValidId(itemId);
+      allow delete: if (isSignedIn() || isValidId(itemId));
     }
 
-    // Settings collection
+    // Settings collection:
+    // Strictly limited to whitelisted setting identifiers and whitelisted field keys
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if isValidId(settingId);
+      allow write: if isValidId(settingId) && (
+        (settingId == 'datasetVersion' && incoming().keys().hasOnly(['version', 'updatedAt'])) ||
+        (settingId == 'googleSheets' && incoming().keys().hasOnly(['spreadsheetId', 'spreadsheetTitle', 'sheetName', 'spreadsheetUrl', 'autoSync', 'lastSyncedAt']))
+      );
     }
   }
 }

@@ -27,6 +27,7 @@ import {
   Layers
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { sanitizeCellValue } from '../utils/security';
 
 interface InventoryTableProps {
   items: InventoryItem[];
@@ -297,7 +298,8 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
 
     const escapeCsv = (val: unknown) => {
       if (val === null || val === undefined) return '""';
-      const str = String(val).replace(/"/g, '""');
+      const safe = sanitizeCellValue(val);
+      const str = String(safe).replace(/"/g, '""');
       return `"${str}"`;
     };
 
@@ -370,24 +372,24 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
       headers,
       ...filteredItems.map((i) => [
         i.itemNumber,
-        i.setor || '',
-        i.sala || '',
-        i.marca || '',
-        i.modelo || '',
-        i.nome || '',
-        i.serial || '',
-        i.monitor1Serial || '',
-        i.monitor1Marca || '',
-        i.monitor2Serial || '',
-        i.monitor2Marca || '',
-        i.adaptador || '',
-        i.nobreakModelo || '',
-        i.nobreakSerial || '',
-        i.responsavel || '',
-        i.matriculaCpf || '',
-        i.funcao || '',
-        i.termoAssinado || '',
-        i.observacoes || ''
+        sanitizeCellValue(i.setor || ''),
+        sanitizeCellValue(i.sala || ''),
+        sanitizeCellValue(i.marca || ''),
+        sanitizeCellValue(i.modelo || ''),
+        sanitizeCellValue(i.nome || ''),
+        sanitizeCellValue(i.serial || ''),
+        sanitizeCellValue(i.monitor1Serial || ''),
+        sanitizeCellValue(i.monitor1Marca || ''),
+        sanitizeCellValue(i.monitor2Serial || ''),
+        sanitizeCellValue(i.monitor2Marca || ''),
+        sanitizeCellValue(i.adaptador || ''),
+        sanitizeCellValue(i.nobreakModelo || ''),
+        sanitizeCellValue(i.nobreakSerial || ''),
+        sanitizeCellValue(i.responsavel || ''),
+        sanitizeCellValue(i.matriculaCpf || ''),
+        sanitizeCellValue(i.funcao || ''),
+        sanitizeCellValue(i.termoAssinado || ''),
+        sanitizeCellValue(i.observacoes || '')
       ])
     ];
 

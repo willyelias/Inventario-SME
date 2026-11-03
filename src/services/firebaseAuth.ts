@@ -67,8 +67,16 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
   }
 };
 
-export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+export const getAccessToken = async (promptIfMissing: boolean = true): Promise<string | null> => {
+  if (cachedAccessToken) return cachedAccessToken;
+  if (!promptIfMissing) return null;
+  try {
+    const res = await googleSignIn();
+    return res?.accessToken || null;
+  } catch (error) {
+    console.warn('Login Google cancelado ou não concluído:', error);
+    return null;
+  }
 };
 
 export const setCachedAccessToken = (token: string | null) => {

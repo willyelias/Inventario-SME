@@ -1,6 +1,7 @@
 import { InventoryItem } from '../types/inventory';
 import * as XLSX from 'xlsx';
 import { isPrinterItem } from '../utils/inventoryValidation';
+import { sanitizeCellValue } from '../utils/security';
 
 export const INVENTORY_HEADERS = [
   '#',
@@ -38,31 +39,34 @@ export function extractSpreadsheetId(idOrUrl: string): string {
   const matchIdParam = clean.match(/[?&]id=([a-zA-Z0-9-_]+)/);
   if (matchIdParam && matchIdParam[1]) return matchIdParam[1];
 
-  // Format 4: raw ID
-  return clean;
+  // Format 4: strict Google Spreadsheet ID format (alphanumeric, dashes, underscores, length >= 15)
+  if (/^[a-zA-Z0-9-_]{15,}$/.test(clean)) {
+    return clean;
+  }
+  return '';
 }
 
 export function itemToRow(item: InventoryItem): (string | number)[] {
   return [
     item.itemNumber,
-    item.setor || '',
-    item.sala || '',
-    item.marca || '',
-    item.modelo || '',
-    item.nome || '',
-    item.serial || '',
-    item.monitor1Serial || '-',
-    item.monitor1Marca || '-',
-    item.monitor2Serial || '-',
-    item.monitor2Marca || '-',
-    item.adaptador || 'NÃO',
-    item.nobreakModelo || '-',
-    item.nobreakSerial || '-',
-    item.responsavel || '',
-    item.matriculaCpf || '',
-    item.funcao || '',
-    item.termoAssinado || 'NÃO',
-    item.updatedAt || new Date().toLocaleString('pt-BR')
+    sanitizeCellValue(item.setor || ''),
+    sanitizeCellValue(item.sala || ''),
+    sanitizeCellValue(item.marca || ''),
+    sanitizeCellValue(item.modelo || ''),
+    sanitizeCellValue(item.nome || ''),
+    sanitizeCellValue(item.serial || ''),
+    sanitizeCellValue(item.monitor1Serial || '-'),
+    sanitizeCellValue(item.monitor1Marca || '-'),
+    sanitizeCellValue(item.monitor2Serial || '-'),
+    sanitizeCellValue(item.monitor2Marca || '-'),
+    sanitizeCellValue(item.adaptador || 'NÃO'),
+    sanitizeCellValue(item.nobreakModelo || '-'),
+    sanitizeCellValue(item.nobreakSerial || '-'),
+    sanitizeCellValue(item.responsavel || ''),
+    sanitizeCellValue(item.matriculaCpf || ''),
+    sanitizeCellValue(item.funcao || ''),
+    sanitizeCellValue(item.termoAssinado || 'NÃO'),
+    sanitizeCellValue(item.updatedAt || new Date().toLocaleString('pt-BR'))
   ];
 }
 
@@ -505,8 +509,9 @@ export async function fetchSpreadsheetMetadata(
   accessToken: string,
   spreadsheetId: string
 ): Promise<{ title: string; sheets: string[]; spreadsheetUrl: string }> {
+  const safeId = encodeURIComponent(spreadsheetId);
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=properties.title,sheets.properties.title,spreadsheetUrl`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}?fields=properties.title,sheets.properties.title,spreadsheetUrl`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`
@@ -522,7 +527,7 @@ export async function fetchSpreadsheetMetadata(
   const data = await response.json();
   const title = data.properties?.title || 'Planilha de Inventário';
   const sheets = (data.sheets || []).map((s: any) => s.properties?.title || 'Sheet1');
-  const spreadsheetUrl = data.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+  const spreadsheetUrl = data.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${safeId}/edit`;
 
   return { title, sheets, spreadsheetUrl };
 }
@@ -532,9 +537,10 @@ export async function readSpreadsheetRows(
   spreadsheetId: string,
   sheetName: string = 'Inventário TI'
 ): Promise<InventoryItem[]> {
+  const safeId = encodeURIComponent(spreadsheetId);
   const range = `${sheetName}!A1:S`;
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}/values/${encodeURIComponent(range)}`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`
@@ -564,11 +570,12 @@ export async function appendInventoryRow(
   sheetName: string,
   item: InventoryItem
 ): Promise<{ updatedRange: string }> {
+  const safeId = encodeURIComponent(spreadsheetId);
   const range = `${sheetName}!A:S`;
   const row = itemToRow(item);
 
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
       headers: {
@@ -597,11 +604,12 @@ export async function batchAppendInventoryRows(
   items: InventoryItem[]
 ): Promise<{ updatedRows: number }> {
   if (items.length === 0) return { updatedRows: 0 };
+  const safeId = encodeURIComponent(spreadsheetId);
   const range = `${sheetName}!A:S`;
   const rows = items.map(itemToRow);
 
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
       headers: {
@@ -630,11 +638,12 @@ export async function updateSpreadsheetRow(
   rowIndex: number,
   item: InventoryItem
 ): Promise<void> {
+  const safeId = encodeURIComponent(spreadsheetId);
   const range = `${sheetName}!A${rowIndex}:S${rowIndex}`;
   const row = itemToRow(item);
 
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${safeId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
       headers: {
