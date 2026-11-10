@@ -7,7 +7,7 @@
  */
 
 const ADMIN_SALT = 'sme_inventario_salt_2026';
-const ADMIN_HASH = 'dee2c0fc52c43f273d4669aa56e8a90cfb0612bfcdd7c7448de2f43c3171a514';
+const ADMIN_HASH = 'f10d9af914021c67fe8de45dd0a85c62c9bbf8a36761b595ed6032f3d67edaa1';
 const SESSION_KEY = 'inventario_sme_admin_session';
 
 export interface AdminSession {

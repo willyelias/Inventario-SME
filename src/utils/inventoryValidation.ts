@@ -128,11 +128,14 @@ export function deduplicateInventory(items: InventoryItem[]): InventoryItem[] {
       if (seenSerials.has(normSerial)) {
         const existingIdx = seenSerials.get(normSerial)!;
         const existingItem = result[existingIdx];
-        // Se o item atual tem ID canônico 'inv-' e o existente não, substitui
-        if (item.id.startsWith('inv-') && !existingItem.id.startsWith('inv-')) {
-          result[existingIdx] = item;
+        const sameSector = (existingItem.setor || '').trim().toUpperCase() === (item.setor || '').trim().toUpperCase();
+        if (sameSector) {
+          // Se o item atual tem ID canônico 'inv-' e o existente não, substitui
+          if (item.id.startsWith('inv-') && !existingItem.id.startsWith('inv-')) {
+            result[existingIdx] = item;
+          }
+          continue;
         }
-        continue;
       }
       seenSerials.set(normSerial, result.length);
     }

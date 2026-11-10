@@ -50,8 +50,8 @@ import {
   isPrinterItem
 } from './utils/inventoryValidation';
 
-const CURRENT_DATA_VERSION = 'v2_2026_10_08';
-const STORAGE_KEY_ITEMS = 'inventario_ti_items_v2';
+const CURRENT_DATA_VERSION = 'v3_2026_11_10';
+const STORAGE_KEY_ITEMS = 'inventario_ti_items_v3';
 const STORAGE_KEY_DATA_VERSION = 'inventario_ti_data_version';
 const STORAGE_KEY_CONFIG = 'inventario_ti_sheets_config_v1';
 
