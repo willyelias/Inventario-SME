@@ -22,9 +22,13 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
   onSelectCategory
 }) => {
   const totalItems = items.length;
-  const assinados = items.filter((i) => i.termoAssinado === 'SIM').length;
-  const pendentesTermo = totalItems - assinados;
-  const pctAssinados = totalItems > 0 ? Math.round((assinados / totalItems) * 100) : 0;
+  const impressoras = items.filter(isPrinterItem).length;
+  const estacoes = totalItems - impressoras;
+
+  // Termos aplicam-se exclusivamente a estações/computadores (impressoras são patrimônio de setor)
+  const assinados = items.filter((i) => !isPrinterItem(i) && i.termoAssinado === 'SIM').length;
+  const pendentesTermo = estacoes - assinados;
+  const pctAssinados = estacoes > 0 ? Math.round((assinados / estacoes) * 100) : 0;
 
   // Pending information
   const itensComPendencias = items.filter(hasPendingInfo).length;
@@ -36,9 +40,6 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
   const dualMonitor = items.filter(
     (i) => i.monitor2Serial && i.monitor2Serial !== '-'
   ).length;
-
-  const impressoras = items.filter(isPrinterItem).length;
-  const estacoes = totalItems - impressoras;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">

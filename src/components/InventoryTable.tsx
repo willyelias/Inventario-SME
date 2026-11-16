@@ -127,8 +127,9 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
 
   const pendentesCount = useMemo(() => items.filter(hasPendingInfo).length, [items]);
   const completosCount = totalCount - pendentesCount;
-  const assinadosCount = useMemo(() => items.filter((i) => i.termoAssinado === 'SIM').length, [items]);
-  const termoPendentesCount = totalCount - assinadosCount;
+  // Termo de responsabilidade aplica-se exclusivamente a estações/computadores
+  const assinadosCount = useMemo(() => items.filter((i) => !isPrinterItem(i) && i.termoAssinado === 'SIM').length, [items]);
+  const termoPendentesCount = useMemo(() => items.filter((i) => !isPrinterItem(i) && i.termoAssinado !== 'SIM').length, [items]);
   const dualMonitorCount = useMemo(() => items.filter((i) => i.monitor2Serial && i.monitor2Serial !== '-').length, [items]);
   const nobreakCount = useMemo(
     () => items.filter((i) => i.nobreakModelo && i.nobreakModelo !== '-' && !i.nobreakModelo.includes('NENHUM')).length,
